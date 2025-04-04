@@ -1,0 +1,9 @@
+{
+  "short_name": "Student Marketplace",
+  "name": "Student Marketplace - Buy, sell, and trade with other students",
+  "icons": [],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1976d2",
+  "background_color": "#ffffff"
+} 

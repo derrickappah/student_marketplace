@@ -1,0 +1,6 @@
+@echo off
+echo Setting production mode to reduce memory usage...
+set NODE_ENV=production
+set NODE_OPTIONS=--max-old-space-size=512
+echo Starting app...
+npm start 

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="400" height="400" viewBox="0 0 400 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .primary { fill: #2563EB; }
+    .secondary { fill: #4B7BF5; }
+    .tertiary { fill: #F3F4F6; }
+    .outline { fill: #64748B; }
+    @media (prefers-color-scheme: dark) {
+      .tertiary { fill: #374151; }
+      .outline { fill: #94A3B8; }
+    }
+  </style>
+  
+  <!-- Background circle -->
+  <circle cx="200" cy="200" r="150" class="tertiary" opacity="0.5"/>
+  
+  <!-- Stack of bookmarks -->
+  <g transform="translate(100, 90)">
+    <!-- Bottom bookmark -->
+    <path d="M30 20C30 8.954 38.954 0 50 0H150C161.046 0 170 8.954 170 20V220L100 180L30 220V20Z" class="secondary" opacity="0.3"/>
+    
+    <!-- Middle bookmark -->
+    <path d="M20 10C20 4.477 24.477 0 30 0H170C175.523 0 180 4.477 180 10V210L100 170L20 210V10Z" class="secondary" opacity="0.5"/>
+    
+    <!-- Top bookmark -->
+    <path d="M10 0C4.477 0 0 4.477 0 10V210L100 170L200 210V10C200 4.477 195.523 0 190 0H10Z" class="primary"/>
+    
+    <!-- Heart outline -->
+    <path d="M100 120C100 120 85 100 65 100C45 100 30 115 30 135C30 170 100 190 100 190C100 190 170 170 170 135C170 115 155 100 135 100C115 100 100 120 100 120Z" class="outline" fill-opacity="0.7" stroke-width="4"/>
+  </g>
+  
+  <!-- Empty status icon -->
+  <circle cx="280" cy="120" r="40" class="tertiary" stroke="#64748B" stroke-width="3"/>
+  <path d="M260 120L280 140L300 100" stroke="#64748B" stroke-width="0" fill="none"/>
+  <path d="M260 120L275 135" stroke="#64748B" stroke-width="4" stroke-linecap="round"/>
+  <path d="M275 135L300 100" stroke="#64748B" stroke-width="4" stroke-linecap="round"/>
+</svg> 

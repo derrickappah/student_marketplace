@@ -1,0 +1,6 @@
+@echo off
+echo Running promotion stats cached fix...
+node apply_stats_cached_fix.js
+echo.
+echo Press any key to exit...
+pause > nul 

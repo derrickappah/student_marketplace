@@ -1,0 +1,13 @@
+@echo off
+echo Installing essential packages in smaller chunks...
+
+set NODE_OPTIONS=--max-old-space-size=256
+
+echo Installing core React...
+call npm install react react-dom --no-save --force
+
+echo Installing React Scripts...
+call npm install react-scripts --no-save --force
+
+echo Try starting with just basic packages...
+npm start 

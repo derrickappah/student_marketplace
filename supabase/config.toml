@@ -1,0 +1,54 @@
+# Supabase Config File
+
+# Project configuration
+[project]
+name = "student-marketplace"
+
+# API Configuration
+[api]
+port = 54321
+schemas = ["public", "storage"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+# Edge Functions settings
+[functions]
+port = 54322
+[functions.analytics]
+verify_jwt = true
+[functions.realtime-handler]
+verify_jwt = true
+[functions.index]
+verify_jwt = true
+
+# Auth settings
+[auth]
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["https://localhost:3000"]
+jwt_expiry = 3600
+enable_signup = true
+
+# Storage configuration
+[storage]
+file_size_limit = "50MiB"
+
+# Storage bucket for listing images
+[[storage.buckets]]
+name = "listings"
+public = true
+file_size_limit = "10MiB"
+allowed_mime_types = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+
+# Storage bucket for user avatars
+[[storage.buckets]]
+name = "avatars"
+public = true
+file_size_limit = "2MiB"
+allowed_mime_types = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+
+# Storage bucket for message attachments
+[[storage.buckets]]
+name = "message-attachments"
+public = false
+file_size_limit = "5MiB"
+allowed_mime_types = ["image/png", "image/jpeg", "image/gif", "application/pdf", "application/zip"] 

@@ -1,0 +1,68 @@
+<svg width="600" height="400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Elements -->
+  <defs>
+    <linearGradient id="blueGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60A5FA" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#2563EB" stop-opacity="0.1"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Large Marketplace Platform -->
+  <rect x="100" y="180" width="400" height="160" rx="20" fill="#F0F9FF" stroke="#60A5FA" stroke-width="3" filter="url(#shadow)"/>
+  
+  <!-- Student Figures -->
+  <!-- Student 1 (left) -->
+  <circle cx="150" cy="140" r="30" fill="#93C5FD"/>
+  <circle cx="150" cy="140" r="25" fill="#BFDBFE"/>
+  <rect x="137" y="130" width="26" height="10" rx="5" fill="#1E40AF"/>
+  <circle cx="142" cy="135" r="3" fill="#1E40AF"/>
+  <circle cx="158" cy="135" r="3" fill="#1E40AF"/>
+  
+  <!-- Student 2 (right) -->
+  <circle cx="450" cy="140" r="30" fill="#F9A8D4"/>
+  <circle cx="450" cy="140" r="25" fill="#FBCFE8"/>
+  <rect x="437" y="130" width="26" height="10" rx="5" fill="#9D174D"/>
+  <circle cx="442" cy="135" r="3" fill="#9D174D"/>
+  <circle cx="458" cy="135" r="3" fill="#9D174D"/>
+  
+  <!-- Product Items -->
+  <!-- Books -->
+  <rect x="130" y="220" width="70" height="80" rx="5" fill="#FEF3C7" stroke="#FBBF24" stroke-width="2"/>
+  <rect x="137" y="230" width="55" height="10" rx="2" fill="#F59E0B"/>
+  <rect x="137" y="250" width="55" height="3" rx="1" fill="#F59E0B"/>
+  <rect x="137" y="260" width="45" height="3" rx="1" fill="#F59E0B"/>
+  <rect x="137" y="270" width="50" height="3" rx="1" fill="#F59E0B"/>
+  
+  <!-- Electronics -->
+  <rect x="220" y="220" width="80" height="60" rx="5" fill="#D1FAE5" stroke="#10B981" stroke-width="2"/>
+  <rect x="230" y="235" width="60" height="35" rx="3" fill="#10B981" fill-opacity="0.3"/>
+  <circle cx="260" cy="280" r="5" fill="#10B981"/>
+  
+  <!-- Clothing -->
+  <rect x="320" y="210" width="60" height="90" rx="5" fill="#EDE9FE" stroke="#8B5CF6" stroke-width="2"/>
+  <path d="M330 230 L350 220 L370 230 L370 260 L330 260 Z" fill="#8B5CF6" fill-opacity="0.3"/>
+  <rect x="340" y="260" width="20" height="30" rx="2" fill="#8B5CF6" fill-opacity="0.2"/>
+  
+  <!-- Furniture -->
+  <rect x="400" y="230" width="70" height="70" rx="5" fill="#FFEDD5" stroke="#F97316" stroke-width="2"/>
+  <rect x="415" y="240" width="40" height="40" rx="3" fill="#F97316" fill-opacity="0.2"/>
+  <rect x="425" y="280" width="20" height="10" rx="1" fill="#F97316"/>
+  
+  <!-- Transaction Arrows -->
+  <path d="M175 150 C 230 100, 300 100, 425 150" stroke="#60A5FA" stroke-width="3" stroke-linecap="round" stroke-dasharray="5,5" fill="none"/>
+  <path d="M425 160 C 370 200, 300 200, 175 160" stroke="#EC4899" stroke-width="3" stroke-linecap="round" stroke-dasharray="5,5" fill="none"/>
+  
+  <!-- Dollar Signs -->
+  <text x="290" y="120" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#2563EB">$</text>
+  <text x="310" y="190" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#DB2777">$</text>
+  
+  <!-- Decorative elements -->
+  <circle cx="480" cy="100" r="15" fill="#BFDBFE"/>
+  <circle cx="120" cy="80" r="10" fill="#FBCFE8"/>
+  <circle cx="100" cy="280" r="12" fill="#FEF3C7"/>
+  <circle cx="500" cy="280" r="8" fill="#D1FAE5"/>
+  <circle cx="300" cy="60" r="5" fill="#EDE9FE"/>
+</svg> 
