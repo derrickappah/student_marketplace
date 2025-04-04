@@ -17,6 +17,7 @@ import {
 import {
   ArrowBack as BackIcon,
   PlayArrow as RunIcon,
+  PlayArrow,
   Info as InfoIcon,
   Error as ErrorIcon,
   Help as HelpIcon,

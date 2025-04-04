@@ -25,13 +25,15 @@ import {
   MenuItem,
   Grid,
   Alert,
-  CircularProgress
+  CircularProgress,
+  Divider
 } from '@mui/material';
 import {
   Visibility as ViewIcon,
   CheckCircle as ResolveIcon,
   Cancel as DismissIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
 import { supabase } from "../../services/supabase";
 import { format } from 'date-fns';
