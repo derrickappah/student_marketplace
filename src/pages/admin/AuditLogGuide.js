@@ -22,7 +22,8 @@ import {
   Visibility as VisibilityIcon,
   Build as BuildIcon,
   Storage as DatabaseIcon,
-  History as HistoryIcon
+  History as HistoryIcon,
+  CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import SyntaxHighlighter from 'react-syntax-highlighter';

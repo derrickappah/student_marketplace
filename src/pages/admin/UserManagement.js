@@ -616,6 +616,10 @@ const UserManagement = () => {
     handleExportMenuClose();
   };
 
+  const handleExportMenuClose = () => {
+    // Add functionality if needed
+  };
+
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
