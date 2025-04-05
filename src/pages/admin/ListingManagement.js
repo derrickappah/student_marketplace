@@ -63,8 +63,7 @@ import { supabase } from '../../services/supabase';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { DateRangePicker } from '@mui/x-date-pickers-pro/DateRangePicker';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { SingleInputDateRangeField } from '@mui/x-date-pickers-pro/SingleInputDateRangeField';
 import { logAdminAction } from '../../services/adminService';
 import { adminDeleteListing, adminBulkDeleteListings } from '../../services/supabase';
 
@@ -734,17 +733,19 @@ const ListingManagement = () => {
               
               <Grid item xs={12} md={6}>
                 <DateRangePicker
-                  startText="Created From"
-                  endText="Created To"
                   value={dateRange}
                   onChange={setDateRange}
-                  renderInput={(startProps, endProps) => (
-                    <>
-                      <TextField {...startProps} fullWidth />
-                      <Box sx={{ mx: 2 }}> to </Box>
-                      <TextField {...endProps} fullWidth />
-                    </>
-                  )}
+                  slotProps={{
+                    textField: { fullWidth: true },
+                    field: {
+                      clearable: true,
+                      label: "Created Date Range",
+                      format: "MM/dd/yyyy"
+                    }
+                  }}
+                  slots={{
+                    field: SingleInputDateRangeField
+                  }}
                 />
               </Grid>
               

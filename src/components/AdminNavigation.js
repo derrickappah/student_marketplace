@@ -28,6 +28,8 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import DarkModeToggle from './DarkModeToggle';
+import { useColorMode } from '../contexts/ThemeContext';
 
 const drawerWidth = 260;
 
@@ -160,6 +162,21 @@ const AdminNavigation = () => {
       
       <List>
         <ListItem 
+          sx={{
+            borderRadius: 1,
+            mx: 1,
+            mb: 0.5,
+            display: 'flex',
+            justifyContent: 'space-between'
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <ListItemText primary="Theme Mode" />
+          </Box>
+          <DarkModeToggle />
+        </ListItem>
+        
+        <ListItem 
           button 
           onClick={() => navigate('/')}
           sx={{
@@ -248,8 +265,8 @@ const AdminNavigation = () => {
             py: 1,
           }}
         >
-          {navigationItems.map((item) => (
-            <Tooltip key={item.title} title={item.title} placement="top">
+          {navigationItems.slice(0, 5).map((item) => (
+            <Tooltip key={item.title} title={item.title}>
               <IconButton
                 color={location.pathname === item.path ? 'primary' : 'default'}
                 onClick={() => handleNavigation(item.path)}
@@ -258,6 +275,12 @@ const AdminNavigation = () => {
               </IconButton>
             </Tooltip>
           ))}
+          
+          <Tooltip title="Theme Mode">
+            <IconButton>
+              <DarkModeToggle size="small" />
+            </IconButton>
+          </Tooltip>
         </Box>
       )}
     </Box>

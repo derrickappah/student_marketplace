@@ -25,7 +25,10 @@ import {
   FormControl,
   InputLabel,
   Stack,
-  useTheme
+  useTheme,
+  CircularProgress,
+  Alert,
+  Snackbar
 } from '@mui/material';
 import {
   Delete as DeleteIcon,
@@ -35,11 +38,17 @@ import {
   ArrowBack as ArrowBackIcon,
   Refresh as RefreshIcon,
   Visibility as VisibilityIcon,
+  Cancel as CancelIcon,
+  Schedule as ScheduleIcon,
+  Report as ReportIcon
 } from '@mui/icons-material';
 import { supabase } from "../../services/supabase";
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { logAdminAction } from '../../services/adminService';
+import { checkAdminReportsAccess, fixAdminReportsAccess } from '../../services/adminReportsAccess';
+import ReportsPolicyDebug from '../../components/admin/ReportsPolicyDebug';
+import AdminDiagnostics from '../../components/admin/AdminDiagnostics';
 
 const ReportsManagement = () => {
   const navigate = useNavigate();
@@ -57,18 +66,66 @@ const ReportsManagement = () => {
   const [resolveReportOpen, setResolveReportOpen] = useState(false);
   const [resolution, setResolution] = useState('');
   const [resolveStatus, setResolveStatus] = useState('resolved');
+  
+  // Admin access state
+  const [accessError, setAccessError] = useState(false);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
 
   useEffect(() => {
-    fetchReports();
+    checkAccess();
   }, []);
 
   useEffect(() => {
     filterReports();
   }, [reports, statusFilter]);
 
+  const checkAccess = async () => {
+    setLoading(true);
+    const { hasAccess, error } = await checkAdminReportsAccess();
+    
+    if (!hasAccess) {
+      console.log('Admin does not have access to reports. Access can be fixed with the button.');
+      setAccessError(true);
+    } else {
+      setAccessError(false);
+      fetchReports();
+    }
+    setLoading(false);
+  };
+
+  const fixAccess = async () => {
+    setLoading(true);
+    const { success, error } = await fixAdminReportsAccess();
+    
+    if (success) {
+      setSnackbar({
+        open: true,
+        message: 'Admin access for reports fixed successfully! Loading reports...',
+        severity: 'success'
+      });
+      setAccessError(false);
+      fetchReports();
+    } else {
+      setSnackbar({
+        open: true,
+        message: 'Failed to fix admin access: ' + (error?.message || 'Unknown error'),
+        severity: 'error'
+      });
+    }
+    setLoading(false);
+  };
+
   const fetchReports = async () => {
     setLoading(true);
+    console.log('Attempting to fetch reports...');
+    
     try {
+      // First, attempt the regular fetch
+      console.log('Regular fetch attempt...');
       const { data, error } = await supabase
         .from('reports')
         .select(`
@@ -79,17 +136,79 @@ const ReportsManagement = () => {
         `)
         .order('created_at', { ascending: false });
         
-      if (error) throw error;
+      if (error) {
+        console.error('Error in regular fetch:', error);
+        throw error;
+      }
       
-      setReports(data || []);
+      if (data && data.length > 0) {
+        console.log(`Successfully fetched ${data.length} reports`);
+        setReports(data);
+        setLoading(false);
+        return;
+      } else {
+        console.log('No reports found in regular fetch. Attempting simple fetch...');
+      }
+      
+      // If no data returned, try a simpler fetch with fewer joins
+      const { data: simpleData, error: simpleError } = await supabase
+        .from('reports')
+        .select('*')
+        .order('created_at', { ascending: false });
+        
+      if (simpleError) {
+        console.error('Error in simple fetch:', simpleError);
+        throw simpleError;
+      }
+      
+      if (simpleData && simpleData.length > 0) {
+        console.log(`Successfully fetched ${simpleData.length} reports with simple query`);
+        setReports(simpleData);
+      } else {
+        console.log('No reports found with simple fetch either.');
+        setReports([]);
+      }
+      
     } catch (error) {
       console.error('Error fetching reports:', error);
+      
+      if (error.message && error.message.includes('permission denied')) {
+        console.log('Permission denied error detected. Setting accessError to true.');
+        setAccessError(true);
+        
+        // Try to get a count of reports to verify they exist
+        try {
+          const serviceRoleKey = process.env.REACT_APP_SUPABASE_SERVICE_ROLE_KEY || '';
+          
+          if (serviceRoleKey) {
+            console.log('Attempting count with service role...');
+            // Create a temporary client with the service role key
+            const serviceClient = supabase.auth.admin;
+            const { count, error: countError } = await serviceClient
+              .from('reports')
+              .select('*', { count: 'exact', head: true });
+              
+            if (countError) {
+              console.error('Error counting reports:', countError);
+            } else {
+              console.log(`Found ${count} reports with service role`);
+            }
+          }
+        } catch (serviceError) {
+          console.error('Error with service role check:', serviceError);
+        }
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const filterReports = () => {
+    if (!reports || reports.length === 0) {
+      setFilteredReports([]);
+      return;
+    }
+    
     let filtered = [...reports];
     
     if (statusFilter !== 'all') {
@@ -251,9 +370,10 @@ const ReportsManagement = () => {
     }
   };
 
-  const getCategoryChip = (category) => {
-    switch (category) {
-      case 'inappropriate_content':
+  const getCategoryChip = (reason) => {
+    // For backwards compatibility, use reason field instead of category
+    switch (reason) {
+      case 'Inappropriate content':
         return (
           <Chip
             label="Inappropriate Content"
@@ -262,52 +382,74 @@ const ReportsManagement = () => {
             variant="outlined"
           />
         );
-      case 'spam':
+      case 'Scam or fraud':
         return (
           <Chip
-            label="Spam"
-            size="small"
-            color="warning"
-            variant="outlined"
-          />
-        );
-      case 'misleading':
-        return (
-          <Chip
-            label="Misleading"
-            size="small"
-            color="info"
-            variant="outlined"
-          />
-        );
-      case 'fraud':
-        return (
-          <Chip
-            label="Fraud"
+            label="Scam/Fraud"
             size="small"
             color="error"
             variant="outlined"
           />
         );
-      case 'harassment':
+      case 'Harmful behavior':
         return (
           <Chip
-            label="Harassment"
+            label="Harmful Behavior"
             size="small"
             color="secondary"
+            variant="outlined"
+          />
+        );
+      case 'Counterfeit product':
+        return (
+          <Chip
+            label="Counterfeit"
+            size="small"
+            color="warning"
+            variant="outlined"
+          />
+        );
+      case 'Offensive messaging':
+        return (
+          <Chip
+            label="Offensive"
+            size="small"
+            color="error"
+            variant="outlined"
+          />
+        );
+      case 'Suspicious activity':
+        return (
+          <Chip
+            label="Suspicious"
+            size="small"
+            color="warning"
+            variant="outlined"
+          />
+        );
+      case 'Policy violation':
+        return (
+          <Chip
+            label="Policy Violation"
+            size="small"
+            color="info"
             variant="outlined"
           />
         );
       default:
         return (
           <Chip
-            label={category?.replace('_', ' ') || 'Other'}
+            label={reason || 'Other'}
             size="small"
             color="default"
             variant="outlined"
           />
         );
     }
+  };
+
+  const handleSnackbarClose = () => {
+    setSnackbar({...snackbar, open: false});
   };
 
   return (
@@ -317,166 +459,214 @@ const ReportsManagement = () => {
           <IconButton onClick={() => navigate('/admin')} sx={{ mr: 2 }} aria-label="back">
             <ArrowBackIcon />
           </IconButton>
-          <Box>
-            <Typography variant="h4" component="h1" gutterBottom fontWeight="bold">
-              Reports Management
-            </Typography>
-            <Typography variant="subtitle1" color="text.secondary">
-              Handle and resolve user-submitted reports
-            </Typography>
-          </Box>
+          <Typography variant="h4" component="h1">
+            Reports Management
+          </Typography>
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={fetchReports}
-        >
-          Refresh
-        </Button>
+        
+        <Stack direction="row" spacing={2}>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={fetchReports}
+            disabled={loading || accessError}
+          >
+            Refresh
+          </Button>
+        </Stack>
       </Box>
 
-      {/* Filters */}
-      <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <FormControl sx={{ minWidth: 200 }}>
-            <InputLabel id="status-filter-label">Status</InputLabel>
-            <Select
-              labelId="status-filter-label"
-              id="status-filter"
-              value={statusFilter}
-              label="Status"
-              onChange={(e) => setStatusFilter(e.target.value)}
+      {/* Access Error Alert */}
+      {accessError && (
+        <Alert 
+          severity="warning" 
+          action={
+            <Button 
+              color="inherit" 
+              size="small" 
+              onClick={fixAccess}
+              disabled={loading}
             >
-              <MenuItem value="all">All Reports</MenuItem>
-              <MenuItem value="pending">Pending</MenuItem>
-              <MenuItem value="resolved">Resolved</MenuItem>
-              <MenuItem value="dismissed">Dismissed</MenuItem>
-            </Select>
-          </FormControl>
+              Fix Access
+            </Button>
+          }
+          sx={{ mb: 3 }}
+        >
+          Admin does not have proper access to reports. Click "Fix Access" to resolve this issue.
+        </Alert>
+      )}
+      
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}>
+          <CircularProgress />
         </Box>
-      </Paper>
+      ) : reports.length === 0 ? (
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <ReportIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+          <Typography variant="h6">No reports found</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {accessError 
+              ? 'Fix access permissions to view reports' 
+              : 'There are no user reports at this time'
+            }
+          </Typography>
+          {!accessError && (
+            <Button 
+              variant="outlined" 
+              startIcon={<RefreshIcon />} 
+              sx={{ mt: 2 }}
+              onClick={fetchReports}
+            >
+              Refresh
+            </Button>
+          )}
+        </Paper>
+      ) : (
+        <>
+          {/* Filters */}
+          <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <FormControl sx={{ minWidth: 200 }}>
+                <InputLabel id="status-filter-label">Status</InputLabel>
+                <Select
+                  labelId="status-filter-label"
+                  id="status-filter"
+                  value={statusFilter}
+                  label="Status"
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <MenuItem value="all">All Reports</MenuItem>
+                  <MenuItem value="pending">Pending</MenuItem>
+                  <MenuItem value="resolved">Resolved</MenuItem>
+                  <MenuItem value="dismissed">Dismissed</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+          </Paper>
 
-      {/* Reports Table */}
-      <Paper
-        sx={{
-          width: '100%',
-          overflow: 'hidden',
-          borderRadius: 2,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
-        }}
-      >
-        <TableContainer sx={{ maxHeight: 600 }}>
-          <Table stickyHeader aria-label="reports table">
-            <TableHead>
-              <TableRow>
-                <TableCell>Report ID</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Reporter</TableCell>
-                <TableCell>Subject</TableCell>
-                <TableCell>Reported On</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
-                    Loading reports...
-                  </TableCell>
-                </TableRow>
-              ) : filteredReports.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
-                    No reports found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredReports
-                  .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                  .map((report) => (
-                    <TableRow key={report.id} hover>
-                      <TableCell>#{report.id}</TableCell>
-                      <TableCell>{getCategoryChip(report.category)}</TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {report.reporter?.name || 'Anonymous'}
-                        </Typography>
-                        {report.reporter?.email && (
-                          <Typography variant="caption" color="text.secondary">
-                            {report.reporter.email}
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {report.reported_user ? (
-                          <Typography variant="body2">
-                            User: {report.reported_user.name}
-                          </Typography>
-                        ) : report.listing ? (
-                          <Typography variant="body2">
-                            Listing: {report.listing.title}
-                          </Typography>
-                        ) : (
-                          <Typography variant="body2">
-                            Other Content
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Typography variant="body2">
-                          {format(new Date(report.created_at), 'MMM d, yyyy')}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {format(new Date(report.created_at), 'h:mm a')}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{getStatusChip(report.status)}</TableCell>
-                      <TableCell align="right">
-                        <Stack direction="row" spacing={1} justifyContent="flex-end">
-                          <IconButton
-                            size="small"
-                            onClick={() => handleOpenViewDialog(report)}
-                            aria-label="view"
-                          >
-                            <VisibilityIcon fontSize="small" />
-                          </IconButton>
-                          {report.status === 'pending' && (
-                            <IconButton
-                              size="small"
-                              onClick={() => handleOpenResolveDialog(report)}
-                              aria-label="resolve"
-                              color="primary"
-                            >
-                              <CheckCircleIcon fontSize="small" />
-                            </IconButton>
-                          )}
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDeleteReport(report.id)}
-                            aria-label="delete"
-                            color="error"
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Stack>
+          {/* Reports Table */}
+          <Paper
+            sx={{
+              width: '100%',
+              overflow: 'hidden',
+              borderRadius: 2,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+            }}
+          >
+            <TableContainer sx={{ maxHeight: 600 }}>
+              <Table stickyHeader aria-label="reports table">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Report ID</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell>Reporter</TableCell>
+                    <TableCell>Subject</TableCell>
+                    <TableCell>Reported On</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {loading ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                        Loading reports...
                       </TableCell>
                     </TableRow>
-                  ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        <TablePagination
-          rowsPerPageOptions={[5, 10, 25, 50]}
-          component="div"
-          count={filteredReports.length}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
-      </Paper>
+                  ) : filteredReports.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center" sx={{ py: 3 }}>
+                        No reports found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredReports
+                      .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                      .map((report) => (
+                        <TableRow key={report.id} hover>
+                          <TableCell>#{report.id}</TableCell>
+                          <TableCell>{getCategoryChip(report.reason)}</TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {report.reporter?.name || 'Anonymous'}
+                            </Typography>
+                            {report.reporter?.email && (
+                              <Typography variant="caption" color="text.secondary">
+                                {report.reporter.email}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {report.reported_user ? (
+                              <Typography variant="body2">
+                                User: {report.reported_user.name}
+                              </Typography>
+                            ) : report.listing ? (
+                              <Typography variant="body2">
+                                Listing: {report.listing.title}
+                              </Typography>
+                            ) : (
+                              <Typography variant="body2">
+                                Other Content
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2">
+                              {format(new Date(report.created_at), 'MMM d, yyyy')}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {format(new Date(report.created_at), 'h:mm a')}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>{getStatusChip(report.status)}</TableCell>
+                          <TableCell align="right">
+                            <Stack direction="row" spacing={1} justifyContent="flex-end">
+                              <IconButton
+                                size="small"
+                                onClick={() => handleOpenViewDialog(report)}
+                                aria-label="view"
+                              >
+                                <VisibilityIcon fontSize="small" />
+                              </IconButton>
+                              {report.status === 'pending' && (
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleOpenResolveDialog(report)}
+                                  aria-label="resolve"
+                                  color="primary"
+                                >
+                                  <CheckCircleIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                              <IconButton
+                                size="small"
+                                onClick={() => handleDeleteReport(report.id)}
+                                aria-label="delete"
+                                color="error"
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <TablePagination
+              rowsPerPageOptions={[5, 10, 25, 50]}
+              component="div"
+              count={filteredReports.length}
+              rowsPerPage={rowsPerPage}
+              page={page}
+              onPageChange={handleChangePage}
+              onRowsPerPageChange={handleChangeRowsPerPage}
+            />
+          </Paper>
+        </>
+      )}
 
       {/* View Report Dialog */}
       <Dialog
@@ -508,7 +698,7 @@ const ReportsManagement = () => {
                       <Typography variant="subtitle2" component="span">
                         Category:
                       </Typography>{' '}
-                      {getCategoryChip(selectedReport.category)}
+                      {getCategoryChip(selectedReport.reason)}
                     </Box>
                     
                     <Box>
@@ -687,6 +877,31 @@ const ReportsManagement = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar 
+        open={snackbar.open} 
+        autoHideDuration={6000} 
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert 
+          onClose={handleSnackbarClose} 
+          severity={snackbar.severity}
+          variant="filled"
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+
+      {/* Debug Tools - Always show for troubleshooting */}
+      <ReportsPolicyDebug />
+      
+      {/* Advanced Diagnostics */}
+      <Box sx={{ mt: 3, mb: 5 }}>
+        <Typography variant="h5" sx={{ mb: 2 }}>Advanced Diagnostics</Typography>
+        <AdminDiagnostics />
+      </Box>
     </Container>
   );
 };

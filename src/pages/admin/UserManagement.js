@@ -214,8 +214,7 @@ const UserManagement = () => {
     if (!userToDelete) return;
     
     try {
-      // Note: This should be handled carefully in a real app
-      // Typically you would want to archive users rather than delete them
+      // Update the user's status to 'deleted'
       const { error } = await supabase
         .from('users')
         .update({ 
@@ -226,6 +225,14 @@ const UserManagement = () => {
         
       if (error) throw error;
       
+      // Log the action
+      await logAdminAction(
+        'delete', 
+        `Marked user as deleted: ${userToDelete.email}`, 
+        userToDelete.id, 
+        'user'
+      );
+      
       // Update local state
       setUsers(users.map(user => 
         user.id === userToDelete.id 
@@ -233,9 +240,16 @@ const UserManagement = () => {
           : user
       ));
       
+      setSnackbarMessage(`User ${userToDelete.name || userToDelete.email} marked as deleted`);
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      
       handleCloseDeleteDialog();
     } catch (error) {
       console.error('Error deleting user:', error);
+      setSnackbarMessage(`Error: ${error.message}`);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
     }
   };
 
@@ -387,11 +401,13 @@ const UserManagement = () => {
       setSnackbarSeverity('success');
       setSnackbarOpen(true);
       
-      // Clear selection after bulk action
+      // Clear selection after action
       setSelected([]);
+      // Close the menu
+      handleBulkActionClose();
     } catch (error) {
       console.error('Error in bulk status update:', error);
-      setSnackbarMessage('Failed to update users');
+      setSnackbarMessage(`Error: ${error.message}`);
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
     } finally {

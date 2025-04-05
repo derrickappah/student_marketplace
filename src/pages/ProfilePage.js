@@ -29,16 +29,22 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  Stack,
 } from '@mui/material';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import InfoIcon from '@mui/icons-material/Info';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import PersonIcon from '@mui/icons-material/Person';
+import InventoryIcon from '@mui/icons-material/Inventory';
+import MessageIcon from '@mui/icons-material/Message';
+import ListAltIcon from '@mui/icons-material/ListAlt';
 import { useAuth } from '../contexts/AuthContext';
 import { updateProfile, getUserListings, uploadImage, supabase } from "../services/supabase";
 import { directDeleteListing, deleteListingByPrimaryKey, deleteListingWithTriggersDisabled } from '../services/direct-sql';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import ListingCard from '../components/ListingCard';
 import { useSnackbar } from 'notistack';
 import { useColorMode } from '../contexts/ThemeContext';
@@ -334,7 +340,7 @@ const ProfilePage = () => {
 
   const handleTabChange = (event, newValue) => {
     // Check for unsaved changes before switching tabs
-    if (hasChanges && (activeTab === 0 || activeTab === 2)) {
+    if (hasChanges && (activeTab === 0 || activeTab === 3)) {
       if (window.confirm('You have unsaved changes. Are you sure you want to leave this tab?')) {
         setActiveTab(newValue);
         setHasChanges(false);
@@ -989,6 +995,7 @@ const ProfilePage = () => {
             >
               <Tab label="Profile Information" />
               <Tab label="My Listings" />
+              <Tab label="My Reports" />
               <Tab label="Notification Settings" />
             </Tabs>
             
@@ -1313,8 +1320,204 @@ const ProfilePage = () => {
                 </Box>
               )}
               
-              {/* Notification Settings */}
+              {/* My Reports */}
               {activeTab === 2 && (
+                <Box>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    mb: 3 
+                  }}>
+                    <Typography 
+                      variant="h5" 
+                      component="h1" 
+                      fontWeight="bold"
+                      sx={{
+                        position: 'relative',
+                        display: 'inline-block',
+                        pb: 1,
+                        '&::after': {
+                          content: '""',
+                          position: 'absolute',
+                          bottom: 0,
+                          left: 0,
+                          width: '40%',
+                          height: 3,
+                          backgroundColor: 'primary.main',
+                          borderRadius: 1.5,
+                        }
+                      }}
+                    >
+                      My Reports
+                    </Typography>
+                    
+                    <Button 
+                      startIcon={<ReportProblemIcon />}
+                      variant="contained" 
+                      component={RouterLink}
+                      to="/my-reports"
+                      sx={{
+                        borderRadius: 2,
+                        px: 2,
+                        py: 1,
+                        transition: 'all 0.2s',
+                        background: mode === 'dark'
+                          ? 'linear-gradient(45deg, #42a5f5 30%, #90caf9 90%)'
+                          : 'linear-gradient(45deg, #1976d2 30%, #42a5f5 90%)',
+                        boxShadow: mode === 'dark'
+                          ? '0 4px 12px rgba(66, 165, 245, 0.35)'
+                          : '0 4px 12px rgba(25, 118, 210, 0.25)',
+                        '&:hover': {
+                          boxShadow: mode === 'dark'
+                            ? '0 6px 16px rgba(66, 165, 245, 0.45)'
+                            : '0 6px 16px rgba(25, 118, 210, 0.35)',
+                          transform: 'translateY(-2px)',
+                        },
+                      }}
+                    >
+                      View All Reports
+                    </Button>
+                  </Box>
+
+                  <Typography variant="body1" paragraph>
+                    View and track the status of reports you've submitted about users, listings, or messages. Use the dedicated reports page to monitor updates and responses from our moderation team.
+                  </Typography>
+                  
+                  <Box sx={{ mt: 3, mb: 4 }}>
+                    <Stack direction="row" spacing={2} alignItems="center">
+                      <ReportProblemIcon color="primary" />
+                      <Typography variant="h6" sx={{ fontWeight: 500 }}>
+                        Report Options
+                      </Typography>
+                    </Stack>
+                    
+                    <Box 
+                      sx={{ 
+                        display: 'grid',
+                        gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' },
+                        gap: 2,
+                        mt: 2
+                      }}
+                    >
+                      <Paper 
+                        elevation={0} 
+                        sx={{ 
+                          p: 2, 
+                          borderRadius: 2,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          textAlign: 'center',
+                          transition: 'all 0.2s',
+                          textDecoration: 'none',
+                          color: 'text.primary',
+                          '&:hover': {
+                            transform: 'translateY(-4px)',
+                            boxShadow: mode === 'dark' 
+                              ? '0 6px 20px rgba(255, 255, 255, 0.1)' 
+                              : '0 6px 20px rgba(0, 0, 0, 0.1)',
+                          }
+                        }}
+                        component={RouterLink}
+                        to="/report?type=user"
+                      >
+                        <Avatar sx={{ mx: 'auto', mb: 1, bgcolor: 'primary.light' }}>
+                          <PersonIcon />
+                        </Avatar>
+                        <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                          Report a User
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Report suspicious or inappropriate user behavior
+                        </Typography>
+                      </Paper>
+                      
+                      <Paper 
+                        elevation={0} 
+                        sx={{ 
+                          p: 2, 
+                          borderRadius: 2,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          textAlign: 'center',
+                          transition: 'all 0.2s',
+                          textDecoration: 'none',
+                          color: 'text.primary',
+                          '&:hover': {
+                            transform: 'translateY(-4px)',
+                            boxShadow: mode === 'dark' 
+                              ? '0 6px 20px rgba(255, 255, 255, 0.1)' 
+                              : '0 6px 20px rgba(0, 0, 0, 0.1)',
+                          }
+                        }}
+                        component={RouterLink}
+                        to="/report?type=listing"
+                      >
+                        <Avatar sx={{ mx: 'auto', mb: 1, bgcolor: 'warning.light' }}>
+                          <InventoryIcon />
+                        </Avatar>
+                        <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                          Report a Listing
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Report prohibited items or misleading listings
+                        </Typography>
+                      </Paper>
+                      
+                      <Paper 
+                        elevation={0} 
+                        sx={{ 
+                          p: 2, 
+                          borderRadius: 2,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          textAlign: 'center',
+                          transition: 'all 0.2s',
+                          textDecoration: 'none',
+                          color: 'text.primary',
+                          '&:hover': {
+                            transform: 'translateY(-4px)',
+                            boxShadow: mode === 'dark' 
+                              ? '0 6px 20px rgba(255, 255, 255, 0.1)' 
+                              : '0 6px 20px rgba(0, 0, 0, 0.1)',
+                          }
+                        }}
+                        component={RouterLink}
+                        to="/report?type=message"
+                      >
+                        <Avatar sx={{ mx: 'auto', mb: 1, bgcolor: 'error.light' }}>
+                          <MessageIcon />
+                        </Avatar>
+                        <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+                          Report a Message
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Report harassment or inappropriate messages
+                        </Typography>
+                      </Paper>
+                    </Box>
+                  </Box>
+                  
+                  <Box sx={{ mt: 3, textAlign: 'center' }}>
+                    <Button 
+                      variant="outlined" 
+                      startIcon={<ListAltIcon />}
+                      component={RouterLink}
+                      to="/my-reports"
+                      size="large"
+                      sx={{ 
+                        borderRadius: 2,
+                        px: 3
+                      }}
+                    >
+                      Go to My Reports
+                    </Button>
+                  </Box>
+                </Box>
+              )}
+              
+              {/* Notification Settings */}
+              {activeTab === 3 && (
                 <Box>
                   <Box sx={{ mb: 3 }}>
                     <Typography 

@@ -2,12 +2,11 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { CssBaseline } from '@mui/material';
 import { SnackbarProvider } from 'notistack';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 
 // Auth Provider
 import { AuthProvider } from './contexts/AuthContext';
 import { NotificationsProvider } from './contexts/NotificationsContext';
+import { MessagingProvider } from './contexts/MessagingContext';
 
 // Pages
 import HomePage from './pages/HomePage';
@@ -33,6 +32,8 @@ import TermsOfUsePage from './pages/TermsOfUsePage';
 import UserProfilePage from './pages/UserProfilePage';
 import UserListingsPage from './pages/UserListingsPage';
 import ReviewPurchasePage from './pages/ReviewPurchasePage';
+import MyReportsPage from './pages/MyReportsPage';
+import TestMessagingPage from './pages/TestMessagingPage';
 
 // Admin Pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -50,6 +51,7 @@ import ListingManagementGuide from './pages/admin/AdminGuides/ListingManagementG
 import AdminDeletionGuide from './pages/admin/AdminGuides/AdminDeletionGuide';
 import ContactMessages from './pages/admin/ContactMessages';
 import ListingPromotionApprovals from './pages/admin/ListingPromotionApprovals';
+import StorageDiagnostics from './pages/admin/StorageDiagnostics';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -80,9 +82,9 @@ const App = () => {
           boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
         }}
       >
-        <LocalizationProvider dateAdapter={AdapterDateFns}>
-          <AuthProvider>
-            <NotificationsProvider>
+        <AuthProvider>
+          <NotificationsProvider>
+            <MessagingProvider>
               <Router>
                 <ScrollToTop />
                 <NotificationHandler />
@@ -104,6 +106,7 @@ const App = () => {
                       <Route path="listings/guide" element={<ListingManagementGuide />} />
                       <Route path="deletion-guide" element={<AdminDeletionGuide />} />
                       <Route path="promotion-approvals" element={<ListingPromotionApprovals />} />
+                      <Route path="storage-diagnostics" element={<StorageDiagnostics />} />
                     </Route>
                   </Route>
                   
@@ -136,7 +139,9 @@ const App = () => {
                       <Route path="messages" element={<MessagesPage />} />
                       <Route path="messages/:id" element={<MessageThreadPage />} />
                       <Route path="report" element={<ReportForm />} />
+                      <Route path="my-reports" element={<MyReportsPage />} />
                       <Route path="user/:userId" element={<UserProfilePage />} />
+                      <Route path="test-messaging" element={<TestMessagingPage />} />
                     </Route>
                     
                     {/* 404 Route */}
@@ -144,9 +149,9 @@ const App = () => {
                   </Route>
                 </Routes>
               </Router>
-            </NotificationsProvider>
-          </AuthProvider>
-        </LocalizationProvider>
+            </MessagingProvider>
+          </NotificationsProvider>
+        </AuthProvider>
       </SnackbarProvider>
     </>
   );

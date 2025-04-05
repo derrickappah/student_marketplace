@@ -46,8 +46,7 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useAuth } from '../../contexts/AuthContext';
 import { DateRangePicker } from '@mui/x-date-pickers-pro/DateRangePicker';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { SingleInputDateRangeField } from '@mui/x-date-pickers-pro/SingleInputDateRangeField';
 import { logAdminAction } from '../../services/adminService';
 
 const AdminAuditLog = () => {
@@ -380,16 +379,20 @@ const AdminAuditLog = () => {
           justifyContent: 'space-between'
         }}>
           <DateRangePicker
-            startText="From Date"
-            endText="To Date"
             value={dateRange}
             onChange={setDateRange}
-            renderInput={(startProps, endProps) => (
-              <Box sx={{ display: 'flex', gap: 2, flexGrow: 1 }}>
-                <TextField {...startProps} fullWidth />
-                <TextField {...endProps} fullWidth />
-              </Box>
-            )}
+            slotProps={{
+              textField: { fullWidth: true },
+              field: {
+                clearable: true,
+                label: "Date Range",
+                format: "MM/dd/yyyy"
+              }
+            }}
+            slots={{
+              field: SingleInputDateRangeField
+            }}
+            sx={{ flexGrow: 1 }}
           />
           
           <Button

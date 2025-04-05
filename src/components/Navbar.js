@@ -41,6 +41,7 @@ import {
   Home as HomeIcon,
   Close as CloseIcon,
   AddCircle as AddCircleIcon,
+  Report as ReportIcon,
 } from '@mui/icons-material';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -510,6 +511,26 @@ const Navbar = () => {
                       <ListItemText primary="Your Listings" />
                     </MenuItem>
                     
+                    <MenuItem 
+                      component={Link} 
+                      to="/my-reports" 
+                      onClick={handleClose}
+                      sx={{
+                        color: isDarkMode ? 'white' : 'inherit',
+                        py: 1.5,
+                        '&:hover': {
+                          backgroundColor: isDarkMode 
+                            ? alpha('#1e88e5', 0.2) 
+                            : alpha('#bbdefb', 0.5),
+                        }
+                      }}
+                    >
+                      <ListItemIcon sx={{ color: isDarkMode ? '#90caf9' : '#1976d2' }}>
+                        <ReportIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText primary="Your Reports" />
+                    </MenuItem>
+                    
                     <Divider sx={{ 
                       my: 1,
                       borderColor: isDarkMode 
@@ -689,24 +710,25 @@ const Navbar = () => {
                   { path: '/', icon: <HomeIcon />, label: 'Home', index: 0 },
                   { path: '/profile', icon: <AccountIcon />, label: 'Your Profile', index: 1 },
                   { path: '/listings', icon: <ShoppingBagIcon />, label: 'Your Listings', index: 2 },
-                  { path: '/saved-listings', icon: <FavoriteIcon />, label: 'Saved Listings', index: 3 },
-                  { path: '/offers', icon: <OfferIcon />, label: 'Offers', index: 4 },
-                  { path: '/messages', icon: <ChatIcon />, label: 'Messages', index: 5 },
-                  { divider: true, index: 6 },
+                  { path: '/my-reports', icon: <ReportIcon />, label: 'Your Reports', index: 3 },
+                  { path: '/saved-listings', icon: <FavoriteIcon />, label: 'Saved Listings', index: 4 },
+                  { path: '/offers', icon: <OfferIcon />, label: 'Offers', index: 5 },
+                  { path: '/messages', icon: <ChatIcon />, label: 'Messages', index: 6 },
+                  { divider: true, index: 7 },
                   { 
                     path: '/create-listing', 
                     icon: <AddCircleIcon color="secondary" />, 
                     label: 'Post a Listing', 
                     special: 'secondary',
-                    index: 7
+                    index: 8
                   },
-                  { divider: true, index: 8 },
+                  { divider: true, index: 9 },
                   { 
                     action: handleSignOut, 
                     icon: <LogoutIcon />, 
                     label: 'Sign Out', 
                     special: 'error',
-                    index: 9
+                    index: 10
                   },
                 ].map((item, i) => 
                   item.divider ? (

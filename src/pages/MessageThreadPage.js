@@ -23,6 +23,10 @@ import {
   ClickAwayListener,
   useTheme,
   useMediaQuery,
+  Breadcrumbs,
+  Link,
+  Stack,
+  alpha
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -48,15 +52,25 @@ import {
   Close as CloseIcon,
   ArrowUpward as ArrowUpwardIcon,
   ArrowDownward as ArrowDownwardIcon,
+  Circle as CircleIcon,
+  NavigateNext as NavigateNextIcon,
+  LocalOffer as LocalOfferIcon,
+  Flag as FlagIcon,
+  Menu as MenuIcon,
+  ShoppingCart as ShoppingCartIcon,
+  Forum as ForumIcon
 } from '@mui/icons-material';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import { format, isToday, isYesterday, isSameWeek, isThisWeek, isThisMonth, isThisYear } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
-import { getMessages, sendMessage, markThreadAsRead, uploadImage, getConversation, sendTypingIndicator, subscribeToTypingIndicators, subscribeToMessages } from "../services/supabase";
+import { markThreadAsRead, uploadImage } from "../services/supabase";
 import { useSnackbar } from 'notistack';
+import { useMessaging } from '../contexts/MessagingContext';
+import { supabase } from '../supabaseClient';
+import { MessageBubble, MessageAttachmentUploader, TypingIndicator } from '../components/messaging';
 
 const MessageThreadPage = () => {
-  const { id: threadId } = useParams();
+  const { id: conversationId } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
   const theme = useTheme();
@@ -76,7 +90,6 @@ const MessageThreadPage = () => {
   const textFieldRef = useRef(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [typingUsers, setTypingUsers] = useState(new Set());
   const [replyingTo, setReplyingTo] = useState(null);
   const [messageActionsAnchor, setMessageActionsAnchor] = useState(null);
   const [selectedMessage, setSelectedMessage] = useState(null);
@@ -89,131 +102,164 @@ const MessageThreadPage = () => {
   const [showSearch, setShowSearch] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
+  const [attachments, setAttachments] = useState([]);
+  const [isTyping, setIsTyping] = useState(false);
+  const typingTimeoutRef = useRef(null);
+
+  const { 
+    conversations,
+    fetchConversations, 
+    activeConversation, 
+    setActiveConversation,
+    sendMessage,
+    subscribeToMessages,
+    subscribeToTypingIndicators,
+    subscribeToReadReceipts,
+    sendTypingIndicator,
+    typingUsers,
+    onlineUsers,
+    readReceipts,
+    updateReadReceipt,
+    markConversationAsRead,
+    getMessageAttachments
+  } = useMessaging();
 
   // Fetch messages and conversation data
   useEffect(() => {
-    const fetchMessages = async () => {
+    const fetchConversation = async () => {
+      if (!conversationId) return;
+      
       try {
         setLoading(true);
         setError('');
 
-        // Get conversation details
-        const { data: conversationData, error: convError } = await getConversation(threadId);
-        if (convError) throw new Error(convError.message);
+        const { data, error } = await supabase
+          .from('conversations')
+          .select(`
+            *,
+            participants:conversation_participants(
+              user_id,
+              user:users(id, name, avatar_url, email, university)
+            ),
+            listing:listings(id, title, price, images, status, description, seller_id)
+          `)
+          .eq('id', conversationId)
+          .single();
         
-        if (!conversationData) {
+        if (error) throw error;
+        
+        // Process the data for easier access
+        const otherParticipants = data.participants
+          .filter(p => p.user && p.user_id !== user.id)
+          .map(p => p.user);
+          
+        const processedConversation = {
+          ...data,
+          otherParticipants
+        };
+        
+        setConversation(processedConversation);
+        setActiveConversation(processedConversation);
+        
+        // Check if user is part of this conversation
+        const isParticipant = data.participants.some(p => p.user_id === user.id);
+        if (!isParticipant) {
           navigate('/messages');
           return;
         }
         
-        setConversation(conversationData);
-        
-        // Get messages for this thread
-        const { data: messagesData, error: messagesError } = await getMessages(threadId);
-        if (messagesError) throw new Error(messagesError.message);
+        // Fetch messages
+        const { data: messagesData, error: messagesError } = await supabase
+          .from('messages')
+          .select(`
+            *,
+            sender:users(id, name, email, avatar_url),
+            attachments:message_attachments(*)
+          `)
+          .eq('conversation_id', conversationId)
+          .order('created_at', { ascending: true });
+          
+        if (messagesError) throw messagesError;
         
         setMessages(messagesData || []);
-        
-        // Mark thread as read
-        await markThreadAsRead(threadId);
+        markConversationAsRead(conversationId);
       } catch (err) {
-        console.error('Error loading messages:', err);
-        setError('Failed to load messages. Please try again.');
+        console.error('Error fetching conversation:', err);
+        setError('Failed to load conversation data');
       } finally {
         setLoading(false);
       }
     };
 
-    if (threadId && user) {
-      fetchMessages();
-    }
-    
-    return () => {
-      // Clean up any subscriptions on unmount
-      if (messageSubscription.current) {
-        messageSubscription.current.unsubscribe();
-      }
-      if (typingSubscription.current) {
-        typingSubscription.current.unsubscribe();
-      }
-    };
-  }, [threadId, user, navigate]);
+    fetchConversation();
+  }, [conversationId, user.id, navigate, setActiveConversation, markConversationAsRead]);
   
-  // Set up real-time subscriptions for messages and typing indicators
+  // Set up real-time subscriptions
   useEffect(() => {
-    if (!threadId || !user) return;
+    if (!conversationId) return;
     
     // Subscribe to new messages
-    messageSubscription.current = subscribeToMessages(threadId, (payload) => {
-      if (payload.new && payload.new.sender_id !== user.id) {
-        // Add the new message to our list
-        setMessages(prev => [...prev, payload.new]);
-        
-        // Mark as read if we're at the bottom of the chat
-        if (isAtBottom) {
-          markThreadAsRead(threadId).catch(console.error);
-        } else {
-          // Increment unread count if we're not at the bottom
-          setUnreadCount(prev => prev + 1);
-        }
-      }
-    });
+    const messageUnsubscribe = subscribeToMessages(conversationId);
     
     // Subscribe to typing indicators
-    typingSubscription.current = subscribeToTypingIndicators(threadId, (payload) => {
-      if (payload.new && payload.new.user_id !== user.id) {
-        setTypingUsers(prev => {
-          const newState = new Set(prev);
-          newState.add(payload.new.user_id);
-          return newState;
-        });
+    const typingUnsubscribe = subscribeToTypingIndicators(conversationId);
+    
+    // Subscribe to read receipts
+    const readReceiptUnsubscribe = subscribeToReadReceipts(conversationId);
+    
+    // Listen for new messages
+    const channel = supabase
+      .channel(`messages:${conversationId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversationId}`
+      }, async (payload) => {
+        if (payload.new) {
+          // If this is someone else's message, mark it as delivered
+          if (payload.new.sender_id !== user.id) {
+            updateReadReceipt(conversationId, payload.new.id, 'delivered');
+            markConversationAsRead(conversationId);
         
-        // Clear typing indicator after 5 seconds of inactivity
-        setTimeout(() => {
-          setTypingUsers(prev => {
-            const newState = new Set(prev);
-            newState.delete(payload.new.user_id);
-            return newState;
-          });
-        }, 5000);
+            // Clear typing indicator for this user
+            if (typingUsers[payload.new.sender_id]) {
+              // The sender just sent a message, so they're no longer typing
+              sendTypingIndicator(conversationId, false);
       }
-    });
-    
-    return () => {
-      if (messageSubscription.current) {
-        messageSubscription.current.unsubscribe();
-      }
-      if (typingSubscription.current) {
-        typingSubscription.current.unsubscribe();
-      }
-    };
-  }, [threadId, user, isAtBottom]);
-  
-  // Handle typing indicator
-  useEffect(() => {
-    if (!threadId || !user || !newMessage) return;
-    
-    // Clear any existing timeout
-    if (typingTimeout.current) {
-      clearTimeout(typingTimeout.current);
+          }
+          
+          // Fetch sender info and attachments if any
+          if (payload.new.has_attachments) {
+            const attachments = await getMessageAttachments(payload.new.id);
+            payload.new.attachments = attachments;
     }
     
-    // Send typing indicator
-    sendTypingIndicator(threadId, user.id, true)
-      .catch(err => console.error('Error sending typing indicator:', err));
+          // Get sender information
+          const { data: senderData } = await supabase
+            .from('users')
+            .select('id, name, email, avatar_url')
+            .eq('id', payload.new.sender_id)
+            .single();
+            
+          if (senderData) {
+            payload.new.sender = senderData;
+          }
+          
+          // Add message to state
+          setMessages(prev => [...prev, payload.new]);
+        }
+      })
+      .subscribe();
     
-    // Set timeout to clear typing indicator after 3 seconds
-    typingTimeout.current = setTimeout(() => {
-      sendTypingIndicator(threadId, user.id, false)
-        .catch(err => console.error('Error clearing typing indicator:', err));
-    }, 3000);
-    
+    // Clean up subscriptions
     return () => {
-      if (typingTimeout.current) {
-        clearTimeout(typingTimeout.current);
-      }
+      channel.unsubscribe();
+      if (messageUnsubscribe) messageUnsubscribe();
+      if (typingUnsubscribe) typingUnsubscribe();
+      if (readReceiptUnsubscribe) readReceiptUnsubscribe();
     };
-  }, [threadId, user, newMessage]);
+  }, [conversationId, user.id, subscribeToMessages, subscribeToTypingIndicators, subscribeToReadReceipts, updateReadReceipt, markConversationAsRead, getMessageAttachments, typingUsers, sendTypingIndicator]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -225,10 +271,10 @@ const MessageThreadPage = () => {
         setUnreadCount(0);
         
         // Mark thread as read
-        markThreadAsRead(threadId).catch(console.error);
+        markConversationAsRead(conversationId).catch(console.error);
       }
     }
-  }, [messages, isAtBottom, unreadCount, threadId]);
+  }, [messages, isAtBottom, unreadCount, conversationId]);
   
   // Track scroll position
   useEffect(() => {
@@ -248,18 +294,18 @@ const MessageThreadPage = () => {
       // If scrolled to bottom, reset unread count and mark as read
       if (atBottom && unreadCount > 0) {
         setUnreadCount(0);
-        markThreadAsRead(threadId).catch(console.error);
+        markConversationAsRead(conversationId).catch(console.error);
       }
     };
     
     messageList.addEventListener('scroll', handleScroll);
     return () => messageList.removeEventListener('scroll', handleScroll);
-  }, [unreadCount, threadId]);
+  }, [unreadCount, conversationId]);
 
   const handleSendMessage = async (e) => {
     e?.preventDefault();
     
-    if (!newMessage.trim() && !imageFile) {
+    if (!newMessage.trim() && !imageFile && attachments.length === 0) {
       return; // Don't send empty messages
     }
     
@@ -286,9 +332,9 @@ const MessageThreadPage = () => {
       
       // Create message data
       const messageData = {
-        conversation_id: threadId,
+        conversation_id: conversationId,
         content: newMessage.trim(),
-        image_url: imagePath,
+        image: imagePath,
       };
       
       // Add reply metadata if replying to a message
@@ -297,7 +343,7 @@ const MessageThreadPage = () => {
       }
       
       // Send message
-      const { data, error } = await sendMessage(messageData);
+      const { data, error } = await sendMessage(conversationId, messageData, attachments);
       
       if (error) throw new Error(error.message);
       
@@ -313,6 +359,7 @@ const MessageThreadPage = () => {
       setImageFile(null);
       setImagePreview('');
       setReplyingTo(null);
+      setAttachments([]);
       
       // Focus back to the input field
       if (textFieldRef.current) {
@@ -324,8 +371,7 @@ const MessageThreadPage = () => {
       setTimeout(() => setSuccess(''), 2000);
       
       // Clear typing indicator after sending
-      sendTypingIndicator(threadId, user.id, false)
-        .catch(err => console.error('Error clearing typing indicator:', err));
+      sendTypingIndicator(conversationId, false);
         
       if (typingTimeout.current) {
         clearTimeout(typingTimeout.current);
@@ -546,798 +592,402 @@ const MessageThreadPage = () => {
     }
   };
 
+  // Handle typing indicator
+  const handleTyping = () => {
+    if (!isTyping) {
+      setIsTyping(true);
+      sendTypingIndicator(conversationId, true);
+    }
+    
+    // Clear previous timeout
+    if (typingTimeout.current) {
+      clearTimeout(typingTimeout.current);
+    }
+    
+    // Set new timeout - stop typing indicator after 2 seconds of inactivity
+    typingTimeout.current = setTimeout(() => {
+      setIsTyping(false);
+      sendTypingIndicator(conversationId, false);
+    }, 2000);
+  };
+
+  // Handle attaching files
+  const handleAttachFiles = (files) => {
+    setAttachments(prev => [...prev, ...files]);
+  };
+
   return (
-    <Container maxWidth="md" sx={{ py: 4 }}>
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 8 }}>
+      {/* Breadcrumbs navigation */}
+      <Breadcrumbs 
+        separator={<NavigateNextIcon fontSize="small" />} 
+        aria-label="breadcrumbs"
+        sx={{ mb: 3 }}
+      >
+        <Link component={RouterLink} to="/" color="inherit">
+          Home
+        </Link>
+        <Link component={RouterLink} to="/messages" color="inherit">
+          Messages
+        </Link>
+        <Typography color="text.primary">
+          {otherUser?.name || 'Conversation'}
+        </Typography>
+      </Breadcrumbs>
+      
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : error ? (
+        <Box sx={{ 
+          p: 4, 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          textAlign: 'center' 
+        }}>
+          <ForumIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2, opacity: 0.5 }} />
+          <Typography variant="h5" color="text.secondary" gutterBottom>
+            {error.includes('recursion') ? 'No Conversations Available' : 'Error Loading Conversation'}
+          </Typography>
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: 500 }}>
+            {error.includes('recursion') ? 
+              "We're having trouble loading your conversations. This can happen when you haven't started any conversations yet." :
+              "We couldn't load this conversation. Please try again later."}
+          </Typography>
+          <Button 
+            variant="contained" 
+            component={RouterLink} 
+            to="/messages"
+          >
+            Back to Messages
+          </Button>
+        </Box>
+      ) : (
+        <Box>
       <Paper 
-        elevation={0} 
         sx={{ 
-          borderRadius: 3,
+              mb: 4, 
           overflow: 'hidden',
-          height: 'calc(100vh - 160px)',
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'linear-gradient(145deg, #ffffff, #f8f9fa)',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04)',
-          position: 'relative',
-          '&::before': {
-            content: '""',
-            position: 'absolute',
-            inset: 0,
-            borderRadius: 'inherit',
-            padding: '1px',
-            background: 'linear-gradient(to bottom right, rgba(255,255,255,0.8), rgba(255,255,255,0))',
-            WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-            WebkitMaskComposite: 'xor',
-            maskComposite: 'exclude',
-            pointerEvents: 'none',
-            zIndex: 1,
-          },
+              borderRadius: 3,
+              boxShadow: theme.palette.mode === 'dark' ? '0 5px 20px rgba(0, 0, 0, 0.2)' : '0 5px 20px rgba(0, 0, 0, 0.05)',
+              border: `1px solid ${alpha(theme.palette.divider, 0.1)}`
         }}
       >
-        {/* Header */}
-        <Box 
-          sx={{ 
+            {/* Conversation Header */}
+            <Box sx={{ 
             p: 2, 
             display: 'flex', 
             alignItems: 'center', 
-            backgroundColor: 'background.light',
-            borderBottom: 1,
-            borderColor: 'divider',
-            position: 'relative',
-            zIndex: 0,
-          }}
-        >
+              borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+              background: theme.palette.mode === 'dark' ? alpha(theme.palette.background.paper, 0.4) : theme.palette.background.paper
+            }}>
           <IconButton 
-            onClick={() => navigate('/messages')} 
-            sx={{ mr: 1 }}
-            aria-label="back to messages"
+                edge="start" 
+                component={RouterLink} 
+                to="/messages"
+                sx={{ mr: 2 }}
           >
             <ArrowBackIcon />
           </IconButton>
           
-          {loading ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-              <Skeleton variant="circular" width={40} height={40} sx={{ mr: 2 }} />
-              <Box sx={{ flex: 1 }}>
-                <Skeleton variant="text" width={120} height={20} />
-                <Skeleton variant="text" width={80} height={16} sx={{ mt: 0.5 }} />
-              </Box>
-            </Box>
-          ) : (
+              {otherUser && (
             <>
               <Badge
                 overlap="circular"
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                badgeContent={
-                  <Box
-                    sx={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: '50%',
-                      bgcolor: 'success.main',
-                      border: '2px solid white',
-                    }}
-                  />
-                }
-                invisible={!Array.from(typingUsers).length}
+                    variant="dot"
+                    color="success"
+                    invisible={!onlineUsers[otherUser.id]}
               >
                 <Avatar 
-                  src={otherUser?.avatar || ''}
-                  alt={otherUser?.name || 'User'}
-                  sx={{ 
-                    width: 40, 
-                    height: 40, 
-                    mr: 2, 
-                    border: '2px solid white',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
-                  }}
-                />
+                      src={otherUser.avatar_url} 
+                      alt={otherUser.name}
+                      sx={{ mr: 2, width: 40, height: 40 }}
+                    >
+                      {otherUser.name ? otherUser.name.charAt(0).toUpperCase() : '?'}
+                    </Avatar>
               </Badge>
-              <Box sx={{ flex: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <Typography variant="subtitle1" fontWeight="medium">
-                    {otherUser?.name || 'User'}
+                  
+                  <Box sx={{ flexGrow: 1 }}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography variant="subtitle1" fontWeight={500}>
+                        {otherUser.name}
                   </Typography>
                   
-                  {Array.from(typingUsers).length > 1 && (
-                    <Chip
-                      label={`${Array.from(typingUsers).length} people typing...`}
+                      <Button
+                        component={RouterLink}
+                        to={`/user/${otherUser.id}`}
                       size="small"
-                      variant="outlined"
-                      sx={{ 
-                        ml: 1, 
-                        height: 20, 
-                        fontSize: '0.65rem',
-                        '& .MuiChip-label': { px: 1 }
-                      }}
-                    />
+                        variant="text"
+                        sx={{ fontSize: '0.75rem', textTransform: 'none', ml: 1 }}
+                      >
+                        View Profile
+                      </Button>
+                    </Stack>
+                    
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      {onlineUsers[otherUser.id] ? (
+                        <>
+                          <CircleIcon sx={{ fontSize: 10, color: 'success.main', mr: 0.5 }} />
+                          <Typography variant="caption" color="text.secondary">
+                            Online
+                          </Typography>
+                        </>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">
+                          Offline
+                        </Typography>
                   )}
                 </Box>
-                
-                {conversation?.listing_title && (
-                  <Typography 
-                    variant="body2" 
-                    color="text.secondary"
-                    component={RouterLink}
-                    to={`/listings/${conversation.listing_id}`}
-                    sx={{ 
-                      maxWidth: 240,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      textDecoration: 'none',
-                      color: 'inherit',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                        color: 'primary.main'
-                      }
-                    }}
-                  >
-                    Re: {conversation.listing_title}
-                  </Typography>
-                )}
-              </Box>
+                  </Box>
+                </>
+              )}
               
+              {/* Action buttons */}
+              <Box>
+                {conversation?.listing && (
+                  <Tooltip title="View Listing">
+                    <Button
+                    component={RouterLink}
+                      to={`/listings/${conversation.listing.id}`}
+                      startIcon={<LocalOfferIcon />}
+                      variant="outlined"
+                      size="small"
+                      sx={{ mr: 1 }}
+                  >
+                      View Listing
+                    </Button>
+                  </Tooltip>
+                )}
+                
+                <Tooltip title="Report User">
               <IconButton 
-                aria-label="conversation options" 
-                size="small"
-                sx={{ 
-                  ml: 1,
-                  '&:hover': {
-                    transform: 'translateY(-2px)',
-                    color: 'primary.main',
-                  }
+                    color="default"
+                    component={RouterLink}
+                    to={{
+                      pathname: "/report",
+                      search: `?type=user&id=${otherUser?.id}`
                 }}
               >
-                <MoreVertIcon />
+                    <FlagIcon />
               </IconButton>
-            </>
-          )}
+                </Tooltip>
+              </Box>
         </Box>
         
-        {/* Messages area */}
+            {/* Listing info if applicable */}
+            {conversation?.listing && (
         <Box 
-          ref={messageListRef}
           sx={{ 
-            p: 3, 
-            flexGrow: 1, 
-            overflowY: 'auto',
+                  p: 2, 
+                  borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                  background: alpha(theme.palette.background.default, 0.4),
             display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-            position: 'relative',
-            scrollBehavior: 'smooth',
-            '&::after': {
-              content: '""',
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              height: '100%',
-              background: 'radial-gradient(circle at 50% 100%, rgba(25, 118, 210, 0.03), transparent 70%)',
-              pointerEvents: 'none',
-            },
-          }}
-        >
-          {loading ? (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, my: 2 }}>
-              {[...Array(5)].map((_, i) => (
-                <Box 
-                  key={i} 
+                  alignItems: 'center'
+                }}
+              >
+                <Box
+                  component="img"
+                  src={conversation.listing.images || 'https://via.placeholder.com/100'}
+                  alt={conversation.listing.title}
                   sx={{ 
-                    display: 'flex', 
-                    justifyContent: i % 2 === 0 ? 'flex-start' : 'flex-end'
+                    width: 60, 
+                    height: 60, 
+                    borderRadius: 1, 
+                    objectFit: 'cover',
+                    mr: 2 
                   }}
-                >
-                  {i % 2 === 0 && (
-                    <Skeleton variant="circular" width={32} height={32} sx={{ mr: 1 }} />
-                  )}
-                  <Box 
-                    sx={{ 
-                      maxWidth: '70%',
-                      width: `${Math.random() * 50 + 20}%`
-                    }}
-                  >
-                    <Skeleton 
-                      variant="rounded" 
-                      width="100%" 
-                      height={Math.random() * 40 + 40} 
-                      sx={{ borderRadius: 3 }} 
-                    />
-                    <Skeleton width={40} height={16} sx={{ mt: 0.5, ml: i % 2 === 0 ? 1 : 'auto' }} />
+                />
+                
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="subtitle2">
+                    {conversation.listing.title}
+                  </Typography>
+                  
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    {conversation.listing.price ? `$${parseFloat(conversation.listing.price).toFixed(2)}` : 'Price not specified'}
+                  </Typography>
+                  
+                  <Typography variant="caption" color="text.secondary">
+                    Status: <Box component="span" sx={{ 
+                      color: conversation.listing.status === 'active' ? 'success.main' : 'text.disabled',
+                      fontWeight: 500
+                    }}>
+                      {conversation.listing.status?.charAt(0).toUpperCase() + conversation.listing.status?.slice(1) || 'Unknown'}
                   </Box>
+                  </Typography>
                 </Box>
-              ))}
-            </Box>
-          ) : error ? (
-            <Alert 
-              severity="error" 
-              sx={{ 
-                mx: 'auto', 
-                mt: 3,
-                borderRadius: 2,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
-              }}
-              action={
+                
                 <Button 
-                  color="inherit" 
+                  variant="contained"
+                  color="primary"
                   size="small"
-                  onClick={() => window.location.reload()}
+                  component={RouterLink}
+                  to={`/listings/${conversation.listing.id}`}
+                  startIcon={<ShoppingCartIcon />}
+                  sx={{ ml: 2 }}
                 >
-                  Retry
+                  View Details
                 </Button>
-              }
+              </Box>
+            )}
+            
+            {/* Messages List */}
+            <Box 
+              sx={{ 
+                height: '50vh', 
+                overflowY: 'auto', 
+                p: 2,
+                display: 'flex',
+                flexDirection: 'column'
+              }}
             >
-              {error}
-            </Alert>
-          ) : messages.length === 0 ? (
+              {messages.length === 0 ? (
             <Box 
               sx={{ 
                 display: 'flex', 
                 flexDirection: 'column', 
-                alignItems: 'center', 
                 justifyContent: 'center',
+                    alignItems: 'center',
                 height: '100%',
-                opacity: 0.7,
+                    p: 3,
+                    textAlign: 'center'
               }}
             >
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
+                  <Typography variant="body1" color="text.secondary" gutterBottom>
                 No messages yet
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Start the conversation by sending a message below
+                    Send a message to start the conversation
               </Typography>
             </Box>
           ) : (
             <>
               {messages.map((message, index) => {
-                const isCurrentUser = message.sender_id === user.id;
-                const showAvatar = index === 0 || messages[index - 1]?.sender_id !== message.sender_id;
-                const messageStatus = getMessageStatus(message);
-                const showDateSeparator = shouldShowDateSeparator(message, index);
+                    const isOwnMessage = message.sender_id === user.id;
+                    const showSender = index === 0 || messages[index - 1]?.sender_id !== message.sender_id;
                 
                 return (
-                  <React.Fragment key={message.id}>
-                    {showDateSeparator && (
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          justifyContent: 'center',
-                          my: 2,
-                          position: 'relative',
-                          '&::before': {
-                            content: '""',
-                            position: 'absolute',
-                            top: '50%',
-                            left: 0,
-                            right: 0,
-                            height: '1px',
-                            backgroundColor: 'divider',
-                            zIndex: 0,
-                          }
-                        }}
-                      >
-                        <Chip
-                          label={formatDateSeparator(message.created_at)}
-                          size="small"
-                          sx={{
-                            backgroundColor: 'background.paper',
-                            fontSize: '0.75rem',
-                            zIndex: 1,
-                            px: 1,
-                          }}
-                        />
-                      </Box>
-                    )}
-                    
-                    <Box 
-                      sx={{ 
-                        display: 'flex', 
-                        justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
-                        mb: 1,
-                      }}
-                    >
-                      {!isCurrentUser && showAvatar && (
-                        <Avatar 
-                          src={otherUser?.avatar || ''}
-                          alt={otherUser?.name || 'User'}
-                          sx={{ 
-                            width: 32, 
-                            height: 32, 
-                            mr: 1, 
-                            mt: 0.5,
-                            border: '1.5px solid white',
-                            boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
-                          }}
-                        />
+                      <MessageBubble
+                        key={message.id}
+                        message={message}
+                        isOwnMessage={isOwnMessage}
+                        showSender={showSender && !isOwnMessage}
+                        sender={message.sender}
+                        attachments={message.attachments}
+                        readReceipts={readReceipts[message.id]}
+                        participants={conversation?.participants}
+                            />
+                    );
+                  })}
+                  
+                  {/* Typing indicator */}
+                  {Object.keys(typingUsers).length > 0 && (
+                    <TypingIndicator 
+                      typingUsers={Object.keys(typingUsers)}
+                      usersMap={Object.fromEntries(
+                        conversation?.participants
+                          .filter(p => p.user_id !== user.id)
+                          .map(p => [p.user_id, p.user]) || []
                       )}
-                      
-                      {!isCurrentUser && !showAvatar && <Box sx={{ width: 32, height: 32, mr: 1 }} />}
-                      
-                      <Box 
-                        sx={{ 
-                          maxWidth: '70%',
-                          minWidth: '100px',
-                          position: 'relative',
-                        }}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          setSelectedMessage(message);
-                          setMessageActionsAnchor(e.currentTarget);
-                        }}
-                      >
-                        {message.reply_to_id && (
-                          <Box
-                            sx={{
-                              ml: isCurrentUser ? 0 : 0,
-                              mr: isCurrentUser ? 0 : 0,
-                              mb: 0.5,
-                              p: 1,
-                              borderRadius: 1.5,
-                              backgroundColor: 'action.hover',
-                              borderLeft: '2px solid',
-                              borderColor: 'primary.main',
-                              display: 'flex',
-                              alignItems: 'center',
-                              maxWidth: '100%',
-                              overflow: 'hidden',
-                              position: 'relative',
-                              fontSize: '0.85rem',
-                              opacity: 0.85,
-                            }}
-                          >
-                            <ReplyIcon 
-                              sx={{ 
-                                fontSize: 16, 
-                                mr: 1, 
-                                color: 'primary.main',
-                                transform: 'scaleX(-1)'
-                              }} 
-                            />
-                            <Typography
-                              variant="body2"
-                              sx={{ 
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                maxWidth: '90%',
-                                fontSize: 'inherit',
-                              }}
-                            >
-                              {/* This would show the replied-to message content */}
-                              {message.reply_to_content || 'Original message'}
-                            </Typography>
-                          </Box>
-                        )}
-                      
-                        <Box
-                          sx={{
-                            p: 2,
-                            borderRadius: isCurrentUser 
-                              ? '16px 16px 4px 16px' 
-                              : '16px 16px 16px 4px',
-                            backgroundColor: isCurrentUser 
-                              ? 'rgba(25, 118, 210, 0.12)'
-                              : 'background.paper',
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
-                            position: 'relative',
-                            transition: 'all 0.2s',
-                            '&:hover': {
-                              backgroundColor: isCurrentUser 
-                                ? 'rgba(25, 118, 210, 0.15)'
-                                : 'rgba(255, 255, 255, 0.95)',
-                            },
-                            ...(isCurrentUser && {
-                              background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.08) 0%, rgba(25, 118, 210, 0.15) 100%)',
-                            }),
-                          }}
-                          onClick={() => {
-                            setSelectedMessage(message);
-                            setMessageActionsAnchor(document.getElementById(`message-${message.id}`));
-                          }}
-                        >
-                          <Box id={`message-${message.id}`} sx={{ position: 'absolute', inset: 0 }} />
-                          
-                          {message.content && (
-                            <Typography variant="body1">
-                              {message.content}
-                            </Typography>
-                          )}
-                          
-                          {message.image_url && (
-                            <Box 
-                              component="img"
-                              src={message.image_url}
-                              alt="Message attachment"
-                              sx={{
-                                maxWidth: '100%',
-                                borderRadius: 1,
-                                mt: message.content ? 2 : 0,
-                                cursor: 'pointer',
-                                transition: 'all 0.2s',
-                                '&:hover': {
-                                  transform: 'scale(0.985)',
-                                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                                }
-                              }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                window.open(message.image_url, '_blank');
-                              }}
-                            />
-                          )}
-                        </Box>
-                        
-                        <Box
-                          sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
-                            mt: 0.5,
-                            mx: 1,
-                          }}
-                        >
-                          <Typography 
-                            variant="caption" 
-                            color="text.secondary"
-                            sx={{ fontSize: '0.7rem' }}
-                          >
-                            {formatMessageDate(message.created_at)}
-                          </Typography>
-                          
-                          {isCurrentUser && messageStatus && (
-                            <Box 
-                              component="span" 
-                              sx={{ 
-                                display: 'inline-flex', 
-                                ml: 0.5,
-                                fontSize: '0.7rem',
-                                color: messageStatus === 'read' ? 'primary.main' : 'text.secondary',
-                              }}
-                            >
-                              {renderStatusIcon(messageStatus)}
-                            </Box>
-                          )}
-                        </Box>
-                      </Box>
-                      
-                      <IconButton
-                        size="small"
-                        sx={{
-                          ml: 0.5,
-                          opacity: 0,
-                          transition: 'all 0.2s',
-                          '&:hover': {
-                            backgroundColor: 'rgba(0,0,0,0.04)',
-                          },
-                          '.message-row:hover &': {
-                            opacity: 0.5,
-                          },
-                        }}
-                        onClick={() => {
-                          setSelectedMessage(message);
-                          setMessageActionsAnchor(document.getElementById(`message-${message.id}`));
-                        }}
-                      >
-                        <MoreVertIcon fontSize="small" />
-                      </IconButton>
-                    </Box>
-                  </React.Fragment>
-                );
-              })}
+                    />
+                  )}
+                  
               <div ref={messagesEndRef} />
             </>
           )}
         </Box>
         
-        {/* Scroll to bottom button */}
-        {showScrollButton && (
-          <Zoom in={showScrollButton}>
+            {/* Message Input */}
             <Box
-              onClick={scrollToBottom}
-              sx={{
-                position: 'absolute',
-                bottom: imagePreview ? 144 : 80,
-                right: 24,
-                zIndex: 10,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-              }}
-            >
-              <IconButton
-                color="primary"
-                sx={{
-                  backgroundColor: 'background.paper',
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.15)',
-                  transition: 'all 0.2s',
-                  '&:hover': {
-                    transform: 'translateY(-2px)',
-                    boxShadow: '0 6px 20px rgba(0,0,0,0.2)',
-                  },
-                }}
-              >
-                <KeyboardArrowDownIcon />
-              </IconButton>
-              
-              {unreadCount > 0 && (
-                <Badge
-                  badgeContent={unreadCount}
-                  color="error"
-                  sx={{
-                    transform: 'translateY(-14px)',
-                    '& .MuiBadge-badge': {
-                      fontSize: '0.7rem',
-                      height: 18,
-                      minWidth: 18,
-                    },
-                  }}
-                />
-              )}
-            </Box>
-          </Zoom>
-        )}
-        
-        {/* Reply preview area */}
-        {replyingTo && (
-          <Box 
+              component="form"
+              onSubmit={handleSendMessage}
             sx={{ 
               p: 2,
-              borderTop: 1,
-              borderColor: 'divider',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 1,
-              backgroundColor: 'action.hover',
-            }}
-          >
-            <Box sx={{ flex: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                <ReplyIcon sx={{ fontSize: 14, mr: 0.5, color: 'primary.main' }} />
-                <Typography variant="caption" fontWeight="medium" color="primary">
-                  Replying to {replyingTo.sender_id === user.id ? 'yourself' : otherUser?.name}
-                </Typography>
-              </Box>
-              <Typography 
-                variant="body2" 
-                sx={{ 
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  display: '-webkit-box',
-                  WebkitLineClamp: 1,
-                  WebkitBoxOrient: 'vertical',
-                  color: 'text.secondary',
-                  fontSize: '0.85rem',
+                borderTop: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                backgroundColor: theme.palette.mode === 'dark' 
+                  ? alpha(theme.palette.background.paper, 0.4) 
+                  : theme.palette.background.paper
                 }}
               >
-                {replyingTo.content}
-              </Typography>
-            </Box>
-            <IconButton 
-              size="small" 
-              onClick={handleCancelReply}
-              sx={{ mt: -0.5 }}
-            >
-              <DeleteIcon fontSize="small" />
-            </IconButton>
-          </Box>
-        )}
-        
-        {/* Image preview area */}
-        {imagePreview && (
+              {/* Attachment preview area */}
+              {attachments.length > 0 && (
           <Box 
             sx={{ 
-              p: 2,
-              borderTop: (theme) => replyingTo ? 0 : 1,
-              borderColor: 'divider',
+                    p: 1, 
+                    mb: 1, 
+                    borderRadius: 1,
+                    backgroundColor: alpha(theme.palette.background.default, 0.5),
               display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              backgroundColor: 'background.default',
+                    flexWrap: 'wrap',
+                    gap: 1
             }}
           >
-            <Box sx={{ position: 'relative', width: 70, height: 70 }}>
-              <img
-                src={imagePreview}
-                alt="Selected attachment"
-                style={{ 
-                  width: '100%', 
-                  height: '100%', 
-                  objectFit: 'cover',
-                  borderRadius: '8px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                }}
-              />
-              <IconButton
+                  {attachments.map((file, index) => (
+                    <Chip
+                      key={index}
+                      label={file.name}
+                      onDelete={() => {
+                        const newAttachments = [...attachments];
+                        newAttachments.splice(index, 1);
+                        setAttachments(newAttachments);
+                      }}
+                      icon={<AttachFileIcon />}
                 size="small"
-                sx={{ 
-                  position: 'absolute', 
-                  top: -8, 
-                  right: -8, 
-                  bgcolor: 'error.main',
-                  color: 'white',
-                  '&:hover': {
-                    bgcolor: 'error.dark',
-                  },
-                  width: 22,
-                  height: 22,
-                  boxShadow: '0 2px 6px rgba(239,83,80,0.4)',
-                }}
-                onClick={handleRemoveImage}
-              >
-                <DeleteIcon fontSize="small" sx={{ fontSize: 14 }} />
-              </IconButton>
-            </Box>
-            <Typography variant="caption" color="text.secondary">
-              Image attached
-            </Typography>
+                      sx={{ maxWidth: '100%' }}
+                    />
+                  ))}
           </Box>
         )}
         
-        {/* Message input area */}
-        <Box 
-          component="form" 
-          onSubmit={handleSendMessage}
-          sx={{ 
-            p: 2, 
-            borderTop: 1,
-            borderColor: 'divider',
-            backgroundColor: 'background.light',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            position: 'relative',
-          }}
-        >
-          <Tooltip title="Attach files">
-            <IconButton 
-              component="label" 
-              aria-label="attach files"
-              sx={{
-                transition: 'all 0.2s',
-                color: imageFile ? 'primary.main' : 'inherit',
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  color: 'primary.main',
-                }
+              <Stack direction="row" spacing={1} alignItems="center">
+                <MessageAttachmentUploader
+                  onChange={handleAttachFiles}
+                  buttonProps={{
+                    size: 'small',
+                    color: 'inherit',
+                    sx: { borderRadius: '50%' }
               }}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleImageSelect}
-                hidden
-              />
-              <AttachFileIcon />
-            </IconButton>
-          </Tooltip>
-          
-          <Tooltip title="Add emoji">
-            <IconButton 
-              aria-label="add emoji"
-              sx={{
-                transition: 'all 0.2s',
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  color: 'primary.main',
-                }
-              }}
-            >
-              <EmojiIcon />
-            </IconButton>
-          </Tooltip>
+                />
           
           <TextField
-            fullWidth
-            inputRef={textFieldRef}
             placeholder="Type a message..."
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            onKeyDown={handleKeyPress}
-            disabled={sending || loading}
+                  fullWidth
             multiline
             maxRows={4}
-            InputProps={{
-              sx: {
-                borderRadius: 3,
-                bgcolor: 'background.paper',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                transition: 'all 0.2s',
-                '&.Mui-focused': {
-                  boxShadow: '0 0 0 3px rgba(25, 118, 210, 0.12)',
-                }
-              }
-            }}
-          />
-          
-          <Tooltip title="Send message (Ctrl+Enter)">
-            <span>
+                  size="small"
+                  value={newMessage}
+                  onChange={(e) => {
+                    setNewMessage(e.target.value);
+                    handleTyping();
+                  }}
+                  InputProps={{
+                    endAdornment: (
               <IconButton 
                 color="primary" 
                 type="submit"
-                disabled={(!newMessage.trim() && !imageFile) || sending || loading}
-                sx={{
-                  bgcolor: 'primary.main',
-                  color: 'white',
-                  transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                  '&:hover': {
-                    bgcolor: 'primary.dark',
-                    transform: 'translateY(-2px) scale(1.05)',
-                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)',
-                  },
-                  '&.Mui-disabled': {
-                    bgcolor: 'action.disabledBackground',
-                    color: 'action.disabled',
-                  }
-                }}
-              >
-                {sending ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
+                        disabled={newMessage.trim() === '' && attachments.length === 0}
+                      >
+                        <SendIcon />
               </IconButton>
-            </span>
-          </Tooltip>
+                    ),
+                    sx: {
+                      borderRadius: 3,
+                      py: 0.5,
+                      backgroundColor: alpha(
+                        theme.palette.background.default, 
+                        theme.palette.mode === 'dark' ? 0.4 : 0.6
+                      ),
+                    }
+                  }}
+                />
+              </Stack>
+            </Box>
+          </Paper>
         </Box>
-      </Paper>
-      
-      {/* Success message */}
-      {success && (
-        <Fade in={!!success}>
-          <Alert 
-            severity="success" 
-            sx={{ 
-              position: 'fixed', 
-              bottom: 16, 
-              right: 16, 
-              borderRadius: 2,
-              boxShadow: '0 6px 16px rgba(0,0,0,0.15)',
-              minWidth: 200,
-            }}
-            onClose={() => setSuccess('')}
-          >
-            {success}
-          </Alert>
-        </Fade>
       )}
-      
-      {/* Message context menu */}
-      <Menu
-        anchorEl={messageActionsAnchor}
-        open={!!messageActionsAnchor}
-        onClose={() => setMessageActionsAnchor(null)}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'center',
-        }}
-        transformOrigin={{
-          vertical: 'top',
-          horizontal: 'center',
-        }}
-        PaperProps={{
-          elevation: 3,
-          sx: {
-            mt: 1,
-            borderRadius: 2,
-            minWidth: 180,
-          }
-        }}
-      >
-        <MenuItem onClick={() => handleMessageAction('reply', selectedMessage)}>
-          <ReplyIcon fontSize="small" sx={{ mr: 1 }} />
-          Reply
-        </MenuItem>
-        <MenuItem onClick={() => handleMessageAction('copy', selectedMessage)}>
-          <CopyIcon fontSize="small" sx={{ mr: 1 }} />
-          Copy text
-        </MenuItem>
-        <MenuItem onClick={() => handleMessageAction('delete', selectedMessage)}>
-          <DeleteIcon fontSize="small" sx={{ mr: 1 }} />
-          Delete
-        </MenuItem>
-        <MenuItem onClick={() => handleMessageAction('report', selectedMessage)}>
-          <ReportIcon fontSize="small" sx={{ mr: 1 }} />
-          Report
-        </MenuItem>
-      </Menu>
     </Container>
   );
 };

@@ -419,22 +419,31 @@ export const getUserListings = async () => {
 };
 
 // User profile functions
-export const ensureUserProfile = async () => {
+export const ensureUserProfile = async (user_id = null, userData = null) => {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    // If specific user_id is not provided, get current user
+    let userId = user_id;
+    let userInfo = userData;
     
-    if (!user) {
-      console.error('User not authenticated in ensureUserProfile');
-      return { success: false, error: 'User not authenticated' };
+    if (!userId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        console.error('User not authenticated in ensureUserProfile');
+        return { success: false, error: 'User not authenticated' };
+      }
+      
+      userId = user.id;
+      userInfo = user;
     }
     
-    console.log('Checking user profile for ID:', user.id);
+    console.log('Checking user profile for ID:', userId);
     
     // Check if the user exists in the users table
     const { data: existingUser, error: checkError } = await supabase
       .from('users')
       .select('id')
-      .eq('id', user.id)
+      .eq('id', userId)
       .single();
       
     if (checkError) { 
@@ -450,27 +459,42 @@ export const ensureUserProfile = async () => {
     }
     
     // If user doesn't exist in the users table, create their profile
-    console.log('Creating user profile with ID:', user.id);
-    const userData = {
-      id: user.id,
-      email: user.email,
-      name: user.user_metadata?.name || 'New User',
-      university: user.user_metadata?.university || 'Default University',
+    console.log('Creating user profile with ID:', userId);
+    
+    let name = 'New User';
+    let email = `user-${userId.substring(0, 8)}@example.com`;
+    let university = 'Default University';
+    
+    // If we have user info, extract details
+    if (userInfo) {
+      name = userInfo.user_metadata?.name || 
+             userInfo.email?.split('@')[0] || 
+             `User ${userId.substring(0, 6)}`;
+             
+      email = userInfo.email || email;
+      university = userInfo.user_metadata?.university || university;
+    }
+    
+    const userProfileData = {
+      id: userId,
+      email: email,
+      name: name,
+      university: university,
       created_at: new Date().toISOString()
     };
     
-    console.log('User data for profile creation:', userData);
+    console.log('User data for profile creation:', userProfileData);
     
     const { error: insertError } = await supabase
       .from('users')
-      .insert([userData]);
+      .insert([userProfileData]);
       
     if (insertError) {
       console.error('Error creating user profile:', insertError);
       return { success: false, error: `Error creating profile: ${insertError.message}` };
     }
     
-    console.log('Successfully created user profile for:', user.id);
+    console.log('Successfully created user profile for:', userId);
     return { success: true, error: null };
   } catch (error) {
     console.error('Exception in ensureUserProfile:', error);
@@ -792,13 +816,15 @@ export const deleteImage = async (imageUrl) => {
 };
 
 // Messages helper functions
-export const sendMessage = async ({ conversation_id, content, image_url = null }) => {
+export const sendMessage = async ({ conversation_id, content, images = null, replyToMessageId = null }) => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     
     if (!user) {
       throw new Error('User not authenticated');
     }
+    
+    const hasAttachments = images && images.length > 0;
     
     // Use the RLS-bypassing function to send the message
     const { data: result, error: sendError } = await supabase.rpc(
@@ -807,8 +833,10 @@ export const sendMessage = async ({ conversation_id, content, image_url = null }
         conv_id: conversation_id,
         sender_id: user.id,
         message_content: content.trim(),
-        message_image_url: image_url,
-        related_listing_id: null
+        message_images: images,
+        related_listing_id: null,
+        has_attachments: hasAttachments,
+        reply_to_message_id: replyToMessageId
       }
     );
     
@@ -837,23 +865,101 @@ export const getMessages = async (conversationId) => {
     
     if (!user) throw new Error('User not authenticated');
     
-    // Use the RLS-bypassing function to get messages
-    const { data: result, error: funcError } = await supabase.rpc(
-      'get_conversation_messages',
-      { conv_id: conversationId }
-    );
+    // Fetch messages with sender information included
+    const { data, error } = await supabase
+      .from('messages')
+      .select(`
+        id,
+        conversation_id,
+        sender_id,
+        sender:sender_id(id, name, avatar_url, email, university),
+        content,
+        created_at,
+        has_attachments,
+        message_images,
+        reply_to_message_id
+      `)
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
     
-    if (funcError) {
-      console.error('Error getting messages:', funcError);
-      throw new Error(`Failed to load messages: ${funcError.message}`);
+    if (error) {
+      console.error('Error getting messages:', error);
+      throw new Error(`Failed to load messages: ${error.message}`);
     }
     
-    if (!result || !result.success) {
-      console.error('Function returned error:', result?.error || 'Unknown error');
-      throw new Error(result?.error || 'Failed to load messages');
+    // Get attachments separately if needed
+    if (data && data.some(message => message.has_attachments)) {
+      const messageIds = data
+        .filter(message => message.has_attachments)
+        .map(message => message.id);
+        
+      if (messageIds.length > 0) {
+        const { data: attachments, error: attachmentsError } = await supabase
+          .from('message_attachments')
+          .select('*')
+          .in('message_id', messageIds);
+          
+        if (!attachmentsError && attachments) {
+          // Add attachments to messages
+          data.forEach(message => {
+            message.attachments = attachments.filter(att => att.message_id === message.id);
+          });
+        }
+      }
     }
     
-    return { data: result.messages || [], error: null };
+    // Ensure all messages have sender information
+    // Create a map of user IDs that need to be fetched separately
+    const missingUserIds = new Set();
+    data.forEach(message => {
+      if (!message.sender && message.sender_id) {
+        missingUserIds.add(message.sender_id);
+      }
+    });
+    
+    // If there are missing users, fetch them
+    if (missingUserIds.size > 0) {
+      const missingUserIdsArray = Array.from(missingUserIds);
+      console.log('Fetching missing user profiles:', missingUserIdsArray);
+      
+      const { data: users, error: usersError } = await supabase
+        .from('users')
+        .select('id, name, avatar_url, email, university')
+        .in('id', missingUserIdsArray);
+      
+      if (!usersError && users) {
+        // Create a map for quick lookup
+        const userMap = {};
+        users.forEach(user => {
+          userMap[user.id] = user;
+        });
+        
+        // Add missing user data to messages
+        data.forEach(message => {
+          if (!message.sender && message.sender_id && userMap[message.sender_id]) {
+            message.sender = userMap[message.sender_id];
+          } else if (!message.sender && message.sender_id) {
+            // If still no user found, create a placeholder
+            message.sender = {
+              id: message.sender_id,
+              name: 'Unknown User',
+              avatar_url: null,
+              email: null,
+              university: null
+            };
+            
+            // Try to create the profile in the background
+            setTimeout(() => {
+              createBasicUserProfile(message.sender_id)
+                .then(() => console.log('Created user profile for', message.sender_id))
+                .catch(err => console.error('Failed to create user profile:', err));
+            }, 100);
+          }
+        });
+      }
+    }
+    
+    return { data: data || [], error: null };
   } catch (error) {
     console.error('Error fetching messages:', error);
     return { data: null, error };
@@ -943,36 +1049,30 @@ export const markThreadAsRead = async (conversationId) => {
     
     if (!user) throw new Error('User not authenticated');
     
-    // Get the conversation to determine if user is buyer or seller
-    const { data: conversation } = await supabase
-      .from('conversations')
-      .select('buyer_id, seller_id')
-      .eq('id', conversationId)
-      .single();
-      
-    if (!conversation) throw new Error('Conversation not found');
+    // Use the RLS-bypassing function to mark messages as read
+    const { data: result, error: funcError } = await supabase.rpc(
+      'mark_conversation_messages_read',
+      { 
+        conv_id: conversationId,
+        user_id: user.id
+      }
+    );
     
-    // Determine which column to update
-    let updateColumn;
-    if (conversation.buyer_id === user.id) {
-      updateColumn = 'last_read_by_buyer';
-    } else if (conversation.seller_id === user.id) {
-      updateColumn = 'last_read_by_seller';
-    } else {
-      throw new Error('User is not part of this conversation');
+    if (funcError) {
+      console.error('Error marking messages as read:', funcError);
+      throw new Error(`Failed to mark messages as read: ${funcError.message}`);
     }
     
-    // Update the last read timestamp
-    const { error } = await supabase
-      .from('conversations')
-      .update({ [updateColumn]: new Date().toISOString() })
-      .eq('id', conversationId);
-      
-    if (error) throw error;
-    return { success: true, error: null };
+    if (!result || !result.success) {
+      console.error('Function returned error:', result?.error || 'Unknown error');
+      throw new Error(result?.error || 'Failed to mark messages as read');
+    }
+    
+    console.log(`Marked ${result.affected_count} messages as read`);
+    return { success: true, data: result, error: null };
   } catch (error) {
     console.error('Error marking thread as read:', error);
-    return { success: false, error };
+    return { success: false, data: null, error };
   }
 };
 
@@ -980,28 +1080,130 @@ export const getConversations = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
     
-    if (!user) throw new Error('User not authenticated');
-    
-    // Use our RLS-bypassing function to get all conversations
-    const { data: result, error: funcError } = await supabase.rpc(
-      'get_user_conversations',
-      { user_uuid: user.id }
-    );
-    
-    if (funcError) {
-      console.error('Error getting conversations:', funcError);
-      throw new Error(`Failed to load conversations: ${funcError.message}`);
+    if (!user) {
+      throw new Error('User not authenticated');
     }
     
-    if (!result || !result.success) {
-      console.error('Function returned error:', result?.error || 'Unknown error');
-      throw new Error(result?.error || 'Failed to load conversations');
+    // Use direct query to fetch conversations instead of the database function
+    // that has issues with read_status column
+    const { data: conversations, error } = await supabase
+      .from('conversations')
+      .select(`
+        *,
+        participants:conversation_participants(
+          user_id,
+          user:users(id, name, avatar_url, email, university)
+        ),
+        listing:listings(id, title, price, images, status, description, seller_id),
+        latest_message:messages(id, content, created_at, sender_id, has_attachments)
+      `)
+      .order('updated_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching conversations:', error);
+      throw new Error(`Failed to load conversations: ${error.message}`);
     }
     
-    return { data: result.conversations || [], error: null };
+    // Process the data for easier frontend use
+    const processedConversations = (conversations || []).map(conversation => {
+      // Find the other participants (excluding current user)
+      const otherParticipants = (conversation.participants || [])
+        .filter(participant => participant.user_id !== user.id)
+        .map(p => {
+          // If user data is missing, create a placeholder profile
+          if (!p.user) {
+            return {
+              id: p.user_id,
+              name: "Unknown User",
+              avatar_url: null,
+              email: null,
+              university: null,
+              _placeholder: true // Mark as placeholder
+            };
+          }
+          return p.user;
+        });
+      
+      // Get the most recent message
+      const messages = conversation.latest_message || [];
+      const latestMessage = messages.length > 0 ? messages[0] : null;
+      
+      return {
+        ...conversation,
+        otherParticipants,
+        latestMessage,
+        unseen_messages: 0 // We'll handle this separately if needed
+      };
+    });
+    
+    // After processing all conversations, try to fetch missing user profiles
+    // This happens asynchronously and won't block the initial display
+    setTimeout(() => {
+      processedConversations.forEach(conversation => {
+        conversation.otherParticipants.forEach(async participant => {
+          if (participant._placeholder) {
+            try {
+              // Create profile in the background
+              await createBasicUserProfile(participant.id);
+            } catch (err) {
+              console.error('Error creating basic profile:', err);
+            }
+          }
+        });
+      });
+    }, 100);
+    
+    return { data: processedConversations, error: null };
   } catch (error) {
-    console.error('Exception in getConversations:', error);
+    console.error('Error in getConversations:', error);
     return { data: [], error };
+  }
+};
+
+// Helper to create a basic user profile
+const createBasicUserProfile = async (userId) => {
+  try {
+    if (!userId) return { success: false, error: 'No user ID provided' };
+    
+    // Check if user already exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', userId)
+      .single();
+    
+    if (existingUser) return { success: true }; // Already exists
+    
+    // Create a basic profile
+    const { error } = await supabase
+      .from('users')
+      .insert([{
+        id: userId,
+        email: `user-${userId.substring(0, 8)}@example.com`,
+        name: `User ${userId.substring(0, 6)}`,
+        university: 'Unknown University',
+        created_at: new Date().toISOString()
+      }]);
+    
+    if (error) {
+      console.error('Error creating basic user profile:', error);
+      return { success: false, error: error.message };
+    }
+    
+    // Notify interested components of the update using a custom event
+    try {
+      const event = new CustomEvent('userProfileCreated', { 
+        detail: { userId } 
+      });
+      window.dispatchEvent(event);
+    } catch (e) {
+      console.log('Could not dispatch profile created event:', e);
+    }
+    
+    return { success: true };
+  } catch (err) {
+    console.error('Exception creating basic profile:', err);
+    return { success: false, error: err.message };
   }
 };
 
@@ -1031,39 +1233,45 @@ export const subscribeToMessages = (conversationId, callback) => {
 
 // Track when a user is viewing a conversation
 export const trackConversationPresence = (conversationId, userId) => {
+  // Validate required parameters
   if (!conversationId || !userId) {
-    console.error('Cannot track presence: Missing conversation ID or user ID');
+    console.error('Cannot track presence: Missing conversation ID or user ID', { conversationId, userId });
     return { unsubscribe: () => {} };
   }
+  
+  try {
+    const channel = supabase
+      .channel(`presence:conversation=${conversationId}`)
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        console.log('Presence state updated:', state);
+        // You can use this state to show who's currently viewing the conversation
+      })
+      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        console.log('User joined:', newPresences);
+      })
+      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+        console.log('User left:', leftPresences);
+      });
 
-  const channel = supabase
-    .channel(`presence:conversation=${conversationId}`)
-    .on('presence', { event: 'sync' }, () => {
-      const state = channel.presenceState();
-      console.log('Presence state updated:', state);
-      // You can use this state to show who's currently viewing the conversation
-    })
-    .on('presence', { event: 'join' }, ({ key, newPresences }) => {
-      console.log('User joined:', newPresences);
-    })
-    .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
-      console.log('User left:', leftPresences);
+    // Subscribe first, then track presence AFTER the subscription is established
+    channel.subscribe((status) => {
+      console.log(`Presence subscription status for conversation ${conversationId}:`, status);
+      
+      if (status === 'SUBSCRIBED') {
+        // Only track presence after successful subscription
+        channel.track({
+          user_id: userId,
+          online_at: new Date().toISOString(),
+        });
+      }
     });
 
-  // Subscribe first, then track presence AFTER the subscription is established
-  channel.subscribe((status) => {
-    console.log(`Presence subscription status for conversation ${conversationId}:`, status);
-    
-    if (status === 'SUBSCRIBED') {
-      // Only track presence after successful subscription
-      channel.track({
-        user_id: userId,
-        online_at: new Date().toISOString(),
-      });
-    }
-  });
-
-  return channel;
+    return channel;
+  } catch (error) {
+    console.error('Error tracking conversation presence:', error);
+    return { unsubscribe: () => {} };
+  }
 };
 
 // Store active typing channels to avoid recreating them
@@ -1072,7 +1280,7 @@ const typingChannels = {};
 // Subscribe to typing indicators for a conversation
 export const subscribeToTypingIndicators = (conversationId, callback) => {
   if (!conversationId) {
-    console.error('Cannot subscribe to typing: No conversation ID provided');
+    console.error('Cannot subscribe: No conversation ID provided');
     return { unsubscribe: () => {} };
   }
 
@@ -1108,41 +1316,51 @@ export const subscribeToTypingIndicators = (conversationId, callback) => {
 };
 
 // Send typing indicator to conversation
-export const sendTypingIndicator = async (conversationId, userId, isTyping) => {
-  if (!conversationId || !userId) return;
-
+export const sendTypingIndicator = async (conversationId, isTyping) => {
   try {
-    // Check if we already have a subscribed channel for this conversation
-    if (!typingChannels[conversationId]) {
-      // Create a new channel and subscribe to it
-      console.log(`Creating new typing channel for conversation ${conversationId}`);
-      const channel = supabase.channel(`typing:conversation=${conversationId}`);
-      
-      // Subscribe to the channel
-      await new Promise((resolve) => {
-        channel.subscribe((status) => {
-          console.log(`Typing channel subscription status: ${status}`);
-          if (status === 'SUBSCRIBED') {
-            resolve();
-          }
-        });
-      });
-      
-      // Store the channel for future use
-      typingChannels[conversationId] = channel;
+    if (!conversationId) throw new Error('Conversation ID is required');
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) throw new Error('User not authenticated');
+    
+    // Use the new function to update typing status
+    const { data: result, error: funcError } = await supabase.rpc(
+      'update_conversation_presence',
+      {
+        conv_id: conversationId,
+        user_uuid: user.id,
+        is_online: true, // Always online when typing
+        is_typing: isTyping
+      }
+    );
+    
+    if (funcError) {
+      console.error('Error updating typing status:', funcError);
+      throw new Error(`Failed to update typing status: ${funcError.message}`);
     }
     
-    // Use the existing or newly created channel
-    await typingChannels[conversationId].send({
+    if (!result || !result.success) {
+      console.error('Function returned error:', result?.error || 'Unknown error');
+      throw new Error(result?.error || 'Failed to update typing status');
+    }
+    
+    // Broadcast typing indicator to the conversation channel
+    const channel = supabase.channel(`presence:${conversationId}`);
+    await channel.send({
       type: 'broadcast',
       event: 'typing',
       payload: {
-        user_id: userId,
-        is_typing: isTyping
+        user_id: user.id,
+        is_typing: isTyping,
+        timestamp: new Date().toISOString()
       }
     });
+    
+    return { success: true };
   } catch (error) {
-    console.error('Error sending typing indicator:', error);
+    console.error('Error in sendTypingIndicator:', error);
+    return { success: false, error };
   }
 };
 
@@ -2572,439 +2790,110 @@ export const fixNotificationSystem = async (userId) => {
 // Update user presence in a conversation
 export const updateUserPresence = async (conversationId, isOnline = true) => {
   try {
+    if (!conversationId) throw new Error('Conversation ID is required');
+    
     const { data: { user } } = await supabase.auth.getUser();
     
-    if (!user) {
-      console.error('Cannot update presence: User not authenticated');
-      return { success: false, error: 'User not authenticated' };
-    }
-
-    if (!conversationId) {
-      console.error('Cannot update presence: No conversation ID provided');
-      return { success: false, error: 'Conversation ID is required' };
-    }
+    if (!user) throw new Error('User not authenticated');
     
-    // Call the RLS-bypassing function to update presence
-    const { data: result, error } = await supabase.rpc(
-      'update_user_presence',
+    // Use the new function to update presence
+    const { data: result, error: funcError } = await supabase.rpc(
+      'update_conversation_presence',
       {
-        user_uuid: user.id,
         conv_id: conversationId,
-        is_online: isOnline
+        user_uuid: user.id,
+        is_online: isOnline,
+        is_typing: false // Default to not typing
       }
     );
     
-    if (error) {
-      console.error('Error updating presence:', error);
-      return { success: false, error: error.message };
-    }
-    
-    return { success: true, data: result };
-  } catch (error) {
-    console.error('Exception in updateUserPresence:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-// Get users currently online in a conversation
-export const getOnlineUsers = async (conversationId) => {
-  try {
-    if (!conversationId) {
-      console.error('Cannot get online users: No conversation ID provided');
-      return { success: false, error: 'Conversation ID is required' };
-    }
-    
-    // Call the RLS-bypassing function to get online users
-    const { data: result, error } = await supabase.rpc(
-      'get_online_users_in_conversation',
-      { conv_id: conversationId }
-    );
-    
-    if (error) {
-      console.error('Error getting online users:', error);
-      return { success: false, error: error.message };
+    if (funcError) {
+      console.error('Error updating presence:', funcError);
+      throw new Error(`Failed to update presence: ${funcError.message}`);
     }
     
     if (!result || !result.success) {
       console.error('Function returned error:', result?.error || 'Unknown error');
-      return { success: false, error: result?.error || 'Failed to get online users' };
+      throw new Error(result?.error || 'Failed to update presence');
     }
     
-    // Transform the array into a map for easier lookup
-    const onlineUsersMap = {};
-    if (result.online_users && Array.isArray(result.online_users)) {
-      result.online_users.forEach(user => {
-        onlineUsersMap[user.user_id] = {
-          lastSeen: user.last_seen,
-          isOnline: true
-        };
-      });
-    }
+    // Broadcast presence update to the conversation channel
+    const channel = supabase.channel(`presence:${conversationId}`);
+    await channel.send({
+      type: 'broadcast',
+      event: 'presence',
+      payload: {
+        user_id: user.id,
+        is_online: isOnline,
+        is_typing: false,
+        timestamp: new Date().toISOString()
+      }
+    });
     
-    return { success: true, data: onlineUsersMap };
+    return { success: true };
   } catch (error) {
-    console.error('Exception in getOnlineUsers:', error);
-    return { success: false, error: error.message };
+    console.error('Error in updateUserPresence:', error);
+    return { success: false, error };
+  }
+};
+
+export const getOnlineUsers = async (conversationId) => {
+  try {
+    if (!conversationId) throw new Error('Conversation ID is required');
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) throw new Error('User not authenticated');
+    
+    // Get online users from the presence table
+    const { data, error } = await supabase
+      .from('conversation_presence')
+      .select(`
+        user_id,
+        is_online,
+        is_typing,
+        last_active,
+        user:users(id, name, avatar_url)
+      `)
+      .eq('conversation_id', conversationId)
+      .eq('is_online', true)
+      .gte('last_active', new Date(Date.now() - 5 * 60 * 1000).toISOString()); // Only users active in the last 5 minutes
+    
+    if (error) {
+      console.error('Error fetching online users:', error);
+      throw error;
+    }
+    
+    // Process the data
+    const onlineUsers = data.map(record => ({
+      id: record.user_id,
+      name: record.user?.name,
+      avatar_url: record.user?.avatar_url,
+      is_typing: record.is_typing,
+      last_active: record.last_active
+    }));
+    
+    return { data: onlineUsers };
+  } catch (error) {
+    console.error('Error in getOnlineUsers:', error);
+    return { data: [], error };
   }
 };
 
 // Function to check and list available storage buckets
 export const listStorageBuckets = async () => {
   try {
+    // List all available storage buckets
     const { data, error } = await supabase.storage.listBuckets();
     
     if (error) {
       console.error('Error listing storage buckets:', error);
-      return { success: false, error: error.message };
+      return { success: false, error };
     }
     
-    console.log('Available storage buckets:', data);
-    return { success: true, buckets: data || [] };
+    return { success: true, data };
   } catch (error) {
-    console.error('Exception listing storage buckets:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-// Function to test avatar storage bucket permissions
-export const testAvatarStorage = async () => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) {
-      return { success: false, error: 'Not authenticated' };
-    }
-    
-    console.log('Testing storage bucket permissions...');
-    
-    // First, check what buckets are available
-    const { success: bucketListSuccess, buckets, error: bucketListError } = await listStorageBuckets();
-    
-    if (!bucketListSuccess) {
-      return { 
-        success: false, 
-        error: 'Failed to list storage buckets: ' + bucketListError,
-        stage: 'list_buckets'
-      };
-    }
-    
-    if (!buckets || buckets.length === 0) {
-      return {
-        success: false,
-        error: 'No storage buckets exist in your Supabase project. Please create one in the Supabase dashboard.',
-        stage: 'no_buckets'
-      };
-    }
-    
-    // Check if 'avatars' bucket exists, if not use the first available bucket
-    let bucketToUse = 'avatars';
-    let bucketExists = buckets.some(bucket => bucket.name === 'avatars');
-    
-    if (!bucketExists) {
-      bucketToUse = buckets[0].name;
-      console.log(`'avatars' bucket not found, using '${bucketToUse}' bucket instead`);
-    }
-    
-    // Test 2: Try to list objects in the public folder
-    const { data: publicFiles, error: listError } = await supabase.storage
-      .from(bucketToUse)
-      .list('public');
-    
-    if (listError) {
-      console.error(`Error listing files in public folder of ${bucketToUse}:`, listError);
-      
-      // If we can't list public, try listing the user's folder
-      const { data: userFiles, error: userListError } = await supabase.storage
-        .from(bucketToUse)
-        .list(user.id);
-      
-      if (userListError) {
-        console.error(`Error listing files in user folder of ${bucketToUse}:`, userListError);
-        
-        // Try listing the root of the bucket
-        const { data: rootFiles, error: rootListError } = await supabase.storage
-          .from(bucketToUse)
-          .list();
-          
-        if (rootListError) {
-          console.error(`Error listing files at root of ${bucketToUse}:`, rootListError);
-          return {
-            success: false,
-            error: `Cannot access bucket contents: ${rootListError.message}`,
-            stage: 'list_root',
-            availableBuckets: buckets.map(b => b.name).join(', ')
-          };
-        }
-        
-        // We can at least list the root, try to create a file there
-        const testRootFileName = `test-${Date.now()}.txt`;
-        const { error: rootUploadError } = await supabase.storage
-          .from(bucketToUse)
-          .upload(testRootFileName, 'Test content', {
-            contentType: 'text/plain',
-            upsert: true
-          });
-          
-        if (rootUploadError) {
-          return {
-            success: false,
-            error: `Cannot write to bucket root: ${rootUploadError.message}`,
-            stage: 'upload_root',
-            recommendedAction: 'Create a public or user folder in the bucket with appropriate permissions'
-          };
-        }
-        
-        // Clean up test file
-        await supabase.storage
-          .from(bucketToUse)
-          .remove([testRootFileName]);
-          
-        return {
-          success: true,
-          message: `Can write to the root of ${bucketToUse} bucket`,
-          recommendedPath: '', // Empty string for root path
-          bucket: bucketToUse
-        };
-      }
-      
-      console.log(`Files in user folder (${user.id}):`, userFiles);
-      return {
-        success: true,
-        message: `Can list files in user folder of ${bucketToUse} bucket`,
-        recommendedPath: `${user.id}/`,
-        bucket: bucketToUse
-      };
-    }
-    
-    console.log(`Files in public folder of ${bucketToUse}:`, publicFiles);
-    
-    // Test 3: Create a test file
-    const testContent = 'Test file to verify storage permissions';
-    const testFileName = `public/test-${Date.now()}.txt`;
-    
-    const { error: uploadError } = await supabase.storage
-      .from(bucketToUse)
-      .upload(testFileName, testContent, {
-        contentType: 'text/plain',
-        upsert: true
-      });
-    
-    if (uploadError) {
-      console.error(`Error uploading test file to ${bucketToUse}:`, uploadError);
-      return {
-        success: false,
-        error: `Upload test failed: ${uploadError.message}`,
-        stage: 'upload_test',
-        recommendedPath: uploadError.message.includes('permission') ? 
-          `${user.id}/` : 'public/',
-        bucket: bucketToUse
-      };
-    }
-    
-    // Clean up test file
-    await supabase.storage
-      .from(bucketToUse)
-      .remove([testFileName]);
-    
-    return {
-      success: true,
-      message: `Storage bucket ${bucketToUse} is properly configured`,
-      recommendedPath: 'public/',
-      bucket: bucketToUse
-    };
-  } catch (error) {
-    console.error('Exception testing avatar storage:', error);
-    return {
-      success: false,
-      error: error.message,
-      stage: 'exception'
-    };
-  }
-};
-
-// Diagnostic function to check Supabase connectivity and configuration
-export const diagnoseSupabaseConnection = async () => {
-  try {
-    console.log('=== SUPABASE CONNECTION DIAGNOSTICS ===');
-    console.log('Supabase URL:', supabase.supabaseUrl);
-    
-    // Check if we can get the user (authentication check)
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    
-    if (userError) {
-      console.error('Auth error:', userError);
-      return {
-        success: false,
-        error: 'Authentication error: ' + userError.message,
-        stage: 'auth'
-      };
-    }
-    
-    console.log('Authenticated user:', userData.user ? userData.user.email : 'Not authenticated');
-    
-    // Try to list buckets with more detailed error handling
-    try {
-      console.log('Attempting to list storage buckets...');
-      const { data, error } = await supabase.storage.listBuckets();
-      
-      if (error) {
-        console.error('Bucket listing error details:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint
-        });
-        
-        return {
-          success: false,
-          error: 'Storage bucket listing error: ' + error.message,
-          code: error.code,
-          hint: error.hint || "Check if Storage service is enabled for your project",
-          stage: 'list_buckets'
-        };
-      }
-      
-      console.log('Storage buckets:', data);
-      
-      if (!data || data.length === 0) {
-        return {
-          success: true,
-          message: 'Connection successful but no buckets found',
-          buckets: []
-        };
-      }
-      
-      // Try to list files in the first bucket
-      const firstBucket = data[0].name;
-      console.log(`Testing access to bucket: ${firstBucket}`);
-      
-      const { data: fileList, error: fileError } = await supabase.storage
-        .from(firstBucket)
-        .list();
-        
-      if (fileError) {
-        console.error('File listing error:', fileError);
-        return {
-          success: true,
-          message: 'Connected to Supabase and found buckets, but cannot list files',
-          buckets: data.map(b => b.name),
-          fileError: fileError.message
-        };
-      }
-      
-      console.log(`Files in ${firstBucket}:`, fileList);
-      
-      return {
-        success: true,
-        message: 'Full Supabase connection successful',
-        buckets: data.map(b => b.name),
-        fileCount: fileList.length
-      };
-    } catch (storageError) {
-      console.error('Storage operation exception:', storageError);
-      return {
-        success: false,
-        error: 'Storage exception: ' + storageError.message,
-        stage: 'storage_exception'
-      };
-    }
-  } catch (error) {
-    console.error('Diagnostic error:', error);
-    return {
-      success: false,
-      error: 'Diagnostic error: ' + error.message,
-      stage: 'general'
-    };
-  }
-};
-
-// Get seller statistics for a user
-export const getSellerStatistics = async (userId) => {
-  try {
-    const { data, error } = await supabase
-      .from('listings')
-      .select(`
-        status,
-        price,
-        created_at
-      `)
-      .eq('user_id', userId);
-    
-    if (error) throw error;
-    
-    // Calculate statistics
-    const total = data.length;
-    const available = data.filter(item => item.status === 'available').length;
-    const sold = data.filter(item => item.status === 'sold').length;
-    const pending = data.filter(item => item.status === 'pending').length;
-    
-    // Calculate total value
-    const totalValue = data.reduce((sum, item) => sum + parseFloat(item.price), 0);
-    const soldValue = data
-      .filter(item => item.status === 'sold')
-      .reduce((sum, item) => sum + parseFloat(item.price), 0);
-    
-    // Get most recent listing date
-    let mostRecent = null;
-    if (data.length > 0) {
-      mostRecent = new Date(Math.max(...data.map(item => new Date(item.created_at))));
-    }
-    
-    return {
-      totalListings: total,
-      availableListings: available,
-      soldListings: sold,
-      pendingListings: pending,
-      totalValue,
-      soldValue,
-      mostRecentListing: mostRecent
-    };
-  } catch (error) {
-    console.error('Error getting seller statistics:', error);
-    return {
-      totalListings: 0,
-      availableListings: 0,
-      soldListings: 0,
-      pendingListings: 0,
-      totalValue: 0,
-      soldValue: 0,
-      mostRecentListing: null
-    };
-  }
-};
-
-// Admin helper functions
-export const adminDeleteListing = async (listingId) => {
-  try {
-    // First, get the listing to record details in the audit log
-    const { data: listing, error: fetchError } = await supabase
-      .from('listings')
-      .select('*')
-      .eq('id', listingId)
-      .single();
-
-    if (fetchError) throw fetchError;
-    
-    // Try to use the database function first
-    const { data, error: rpcError } = await supabase
-      .rpc('admin_delete_listing', { p_listing_id: listingId });
-    
-    // If the function doesn't exist or fails, fall back to manual deletion
-    if (rpcError) {
-      console.log('RPC function failed, using direct deletion fallback:', rpcError);
-      
-      // Direct deletion with explicit column references
-      const { error: deleteError } = await supabase
-        .from('listings')
-        .delete()
-        .eq('id', listingId);
-        
-      if (deleteError) throw deleteError;
-    }
-    
-    return { success: true, listing };
-  } catch (error) {
-    console.error('Error in adminDeleteListing:', error);
+    console.error('Error in listStorageBuckets:', error);
     return { success: false, error };
   }
 };
@@ -3380,5 +3269,1032 @@ export const requestListingPromotion = async (listingId, promotionOptions) => {
   } catch (error) {
     console.error('[Promotion Debug] Unexpected error:', error);
     return { success: false, error: error.message };
+  }
+};
+
+// Add a function to upload message attachments
+export const uploadMessageAttachment = async (messageId, file) => {
+  try {
+    if (!messageId || !file) {
+      throw new Error('Message ID and file are required');
+    }
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    
+    // First upload the file to storage
+    const fileName = `${Date.now()}_${file.name}`;
+    const filePath = `message_attachments/${messageId}/${fileName}`;
+    
+    const { data: uploadData, error: uploadError } = await supabase
+      .storage
+      .from('attachments')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+    
+    if (uploadError) {
+      console.error('Error uploading attachment:', uploadError);
+      throw new Error(`Failed to upload attachment: ${uploadError.message}`);
+    }
+    
+    // Get the public URL
+    const { data: { publicUrl } } = supabase
+      .storage
+      .from('attachments')
+      .getPublicUrl(filePath);
+    
+    // Insert the attachment record
+    const { data: attachmentData, error: attachmentError } = await supabase
+      .from('message_attachments')
+      .insert({
+        message_id: messageId,
+        file_url: publicUrl,
+        file_type: file.type,
+        file_name: file.name,
+        file_size: file.size
+      });
+    
+    if (attachmentError) {
+      console.error('Error saving attachment record:', attachmentError);
+      throw new Error(`Failed to save attachment record: ${attachmentError.message}`);
+    }
+    
+    return { success: true, data: { url: publicUrl, type: file.type, name: file.name, size: file.size } };
+  } catch (error) {
+    console.error('Error in uploadMessageAttachment:', error);
+    return { success: false, error };
+  }
+};
+
+// Download a message attachment
+export const downloadMessageAttachment = async (attachment) => {
+  try {
+    // Debug logging to see what's being received
+    console.log("Download attachment called with:", attachment);
+    
+    if (!attachment) {
+      console.error("Attachment is undefined or null");
+      throw new Error('Invalid attachment data: attachment is undefined');
+    }
+    
+    // Try to get or construct a valid file URL
+    let fileUrl = attachment.file_url;
+    
+    if (!fileUrl) {
+      console.error("Attachment is missing file_url property:", attachment);
+      
+      // Check available buckets to find the right one
+      const { success: bucketsSuccess, buckets } = await listStorageBuckets();
+      let availableBuckets = [];
+      
+      if (bucketsSuccess && buckets && buckets.length > 0) {
+        availableBuckets = buckets.map(b => b.name);
+        console.log("Available storage buckets:", availableBuckets);
+      } else {
+        console.warn("Could not get list of buckets, will try default names");
+        // Try common bucket names as fallback
+        availableBuckets = ['attachments', 'media', 'uploads', 'files', 'images', 'listings', 'avatars'];
+      }
+      
+      // If we have the necessary information, try to construct the URL using all available buckets
+      if (attachment.message_id && attachment.file_name) {
+        console.log("Attempting to construct URL from message_id and file_name");
+        
+        // Try various path patterns in different buckets
+        for (const bucket of availableBuckets) {
+          try {
+            // Try different folder structures
+            const pathVariations = [
+              `message_attachments/${attachment.message_id}/${attachment.file_name}`,
+              `messages/${attachment.message_id}/${attachment.file_name}`,
+              `${attachment.message_id}/${attachment.file_name}`,
+              attachment.file_name
+            ];
+            
+            for (const path of pathVariations) {
+              try {
+                console.log(`Trying bucket '${bucket}' with path '${path}'`);
+                const { data: urlData } = supabase.storage
+                  .from(bucket)
+                  .getPublicUrl(path);
+                  
+                if (urlData?.publicUrl) {
+                  fileUrl = urlData.publicUrl;
+                  console.log("Successfully constructed URL:", fileUrl);
+                  break;
+                }
+              } catch (e) {
+                // Continue to next path
+              }
+            }
+            
+            if (fileUrl) break; // Found a working URL, exit the bucket loop
+          } catch (e) {
+            // Continue to next bucket
+          }
+        }
+      }
+    }
+    
+    // If we still don't have a file URL, try other properties
+    if (!fileUrl) {
+      fileUrl = attachment.url || 
+               attachment.publicUrl ||
+               attachment.storage_url ||
+               attachment.src || 
+               attachment.link || 
+               attachment.path;
+               
+      if (fileUrl) {
+        console.log("Found URL in alternative property:", fileUrl);
+      }
+    }
+    
+    // If we still don't have a URL, throw an error
+    if (!fileUrl) {
+      throw new Error('Invalid attachment data: missing file_url and unable to construct URL');
+    }
+    
+    // Extract the file name from the attachment
+    const fileName = attachment.file_name || attachment.filename || 'download';
+    
+    // Create a link element to trigger the download
+    const link = document.createElement('a');
+    link.href = fileUrl;
+    link.setAttribute('download', fileName);
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+    
+    // For image types, fetch the file first to ensure it downloads correctly
+    if (attachment.file_type && attachment.file_type.startsWith('image/')) {
+      try {
+        // Fetch the image
+        const response = await fetch(fileUrl);
+        if (!response.ok) throw new Error(`Failed to fetch file: ${response.status} ${response.statusText}`);
+        
+        // Get the blob
+        const blob = await response.blob();
+        
+        // Create a blob URL and set it as the link's href
+        const blobUrl = URL.createObjectURL(blob);
+        link.href = blobUrl;
+        
+        // Click the link to trigger the download
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Clean up the blob URL
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+        
+        return { success: true, message: 'Download started' };
+      } catch (fetchError) {
+        console.error('Error fetching image for download:', fetchError);
+        // Fall back to direct link click if fetch fails
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return { success: true, message: 'Download attempted via direct link' };
+      }
+    } else {
+      // For non-image files, use direct link
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return { success: true, message: 'Download started' };
+    }
+  } catch (error) {
+    console.error('Error downloading attachment:', error);
+    return { success: false, error: error.message || 'Unknown error downloading attachment' };
+  }
+};
+
+// Download all attachments from a conversation as a ZIP file
+export const downloadConversationAttachments = async (conversationId, otherParticipantName = 'Conversation') => {
+  try {
+    if (!conversationId) {
+      throw new Error('Conversation ID is required');
+    }
+    
+    // Dynamic import JSZip to avoid having it in the main bundle
+    const JSZip = (await import('jszip')).default;
+    
+    // Create a new ZIP file
+    const zip = new JSZip();
+    let filesAdded = 0;
+    
+    // First get all messages in the conversation
+    const { data: messages, error: messagesError } = await getMessages(conversationId);
+    
+    if (messagesError) {
+      throw new Error(`Failed to fetch messages: ${messagesError.message}`);
+    }
+    
+    if (!messages || messages.length === 0) {
+      throw new Error('No messages found in this conversation');
+    }
+    
+    console.log(`Found ${messages.length} messages in conversation`);
+    
+    // Create a folder for each date messages were sent
+    const messagesByDate = messages.reduce((acc, message) => {
+      // Check for different forms of attachments
+      const hasAttachments = 
+        (message.attachments && message.attachments.length > 0) ||
+        (message.message_images && message.message_images.length > 0) ||
+        message.has_attachments;
+      
+      if (!hasAttachments) {
+        return acc;
+      }
+      
+      // Get attachment list from various possible sources
+      let attachmentsList = [];
+      
+      if (message.attachments && message.attachments.length > 0) {
+        attachmentsList = message.attachments;
+      } else if (message.message_images && message.message_images.length > 0) {
+        // Convert image URLs to attachment-like objects
+        attachmentsList = message.message_images.map(imgUrl => ({
+          file_url: imgUrl,
+          file_name: `image_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`,
+          file_type: 'image/jpeg'
+        }));
+      } else if (message.has_attachments) {
+        // Message indicates it has attachments but none are in the expected format
+        console.warn("Message has has_attachments flag but no attachment data:", message);
+      }
+      
+      if (attachmentsList.length === 0) {
+        return acc;
+      }
+      
+      const messageDate = new Date(message.created_at);
+      const dateKey = messageDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      if (!acc[dateKey]) {
+        acc[dateKey] = [];
+      }
+      
+      // Store message with its processed attachments
+      acc[dateKey].push({
+        ...message,
+        processedAttachments: attachmentsList
+      });
+      
+      return acc;
+    }, {});
+    
+    // Log found attachments
+    const totalDates = Object.keys(messagesByDate).length;
+    console.log(`Found messages with attachments on ${totalDates} different dates`);
+    
+    if (totalDates === 0) {
+      throw new Error('No attachments were found in this conversation');
+    }
+    
+    // Download each attachment
+    const downloadPromises = [];
+    
+    for (const [dateKey, dateMessages] of Object.entries(messagesByDate)) {
+      const dateFolder = zip.folder(dateKey);
+      
+      for (const message of dateMessages) {
+        if (!message.processedAttachments || message.processedAttachments.length === 0) continue;
+        
+        for (const attachment of message.processedAttachments) {
+          downloadPromises.push(
+            (async () => {
+              try {
+                // Try to get or construct a valid file URL
+                let fileUrl = attachment.file_url;
+                
+                if (!fileUrl) {
+                  // Try different property names that might contain the URL
+                  fileUrl = attachment.url || 
+                           attachment.publicUrl ||
+                           attachment.storage_url ||
+                           attachment.src || 
+                           attachment.link || 
+                           attachment.path;
+                  
+                  // If we still don't have a URL and we have the necessary information, try to construct it
+                  if (!fileUrl && attachment.message_id && attachment.file_name) {
+                    // Check available buckets to find the right one
+                    const { success: bucketsSuccess, buckets } = await listStorageBuckets();
+                    let availableBuckets = [];
+                    
+                    if (bucketsSuccess && buckets && buckets.length > 0) {
+                      availableBuckets = buckets.map(b => b.name);
+                      console.log("ZIP download - Available storage buckets:", availableBuckets);
+                    } else {
+                      console.warn("ZIP download - Could not get list of buckets, will try default names");
+                      // Try common bucket names as fallback
+                      availableBuckets = ['attachments', 'media', 'uploads', 'files', 'images', 'listings', 'avatars'];
+                    }
+                    
+                    // Try various path patterns in different buckets
+                    for (const bucket of availableBuckets) {
+                      try {
+                        const pathVariations = [
+                          `message_attachments/${attachment.message_id}/${attachment.file_name}`,
+                          `messages/${attachment.message_id}/${attachment.file_name}`,
+                          `${attachment.message_id}/${attachment.file_name}`,
+                          attachment.file_name
+                        ];
+                        
+                        for (const path of pathVariations) {
+                          try {
+                            console.log(`ZIP download - Trying bucket '${bucket}' with path '${path}'`);
+                            const { data: urlData } = supabase.storage
+                              .from(bucket)
+                              .getPublicUrl(path);
+                              
+                            if (urlData?.publicUrl) {
+                              fileUrl = urlData.publicUrl;
+                              console.log("ZIP download - Successfully constructed URL:", fileUrl);
+                              break;
+                            }
+                          } catch (e) {
+                            // Continue to next path
+                          }
+                        }
+                        
+                        if (fileUrl) break; // Found a working URL, exit the bucket loop
+                      } catch (e) {
+                        // Continue to next bucket
+                      }
+                    }
+                  }
+                  
+                  if (!fileUrl) {
+                    console.warn('Attachment missing file_url:', attachment);
+                    return;
+                  }
+                }
+                
+                // Create a safe filename
+                const timestamp = new Date(message.created_at)
+                  .toISOString()
+                  .replace(/:/g, '-')
+                  .replace(/\..+/, '');
+                
+                // Get display name from attachment or extract from URL
+                let fileName = attachment.file_name || attachment.filename;
+                if (!fileName) {
+                  // Try to extract from URL
+                  const urlParts = fileUrl.split('/');
+                  fileName = urlParts[urlParts.length - 1] || 'file';
+                  
+                  // Remove URL parameters if any
+                  fileName = fileName.split('?')[0];
+                }
+                
+                const safeFileName = `${timestamp}_${fileName}`;
+                
+                // Fetch the file
+                const response = await fetch(fileUrl);
+                
+                if (!response.ok) {
+                  console.error(`Failed to fetch ${fileName}:`, response.statusText);
+                  return;
+                }
+                
+                // Get the blob
+                const blob = await response.blob();
+                
+                // Add to zip in date folder
+                dateFolder.file(safeFileName, blob);
+                filesAdded++;
+              } catch (err) {
+                console.error(`Error downloading attachment:`, err);
+              }
+            })()
+          );
+        }
+      }
+    }
+    
+    // Wait for all downloads to complete
+    await Promise.allSettled(downloadPromises);
+    
+    if (filesAdded === 0) {
+      throw new Error('No attachments were found or could be downloaded');
+    }
+    
+    console.log(`Successfully downloaded ${filesAdded} attachments, creating ZIP file...`);
+    
+    // Generate the ZIP file
+    const content = await zip.generateAsync({ type: 'blob' });
+    
+    // Create a safe filename for the ZIP
+    const safeParticipantName = otherParticipantName.replace(/[^a-z0-9]/gi, '_').slice(0, 30);
+    
+    // Create a download link
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = `${safeParticipantName}_attachments.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    // Clean up
+    setTimeout(() => URL.revokeObjectURL(link.href), 100);
+    
+    return { 
+      success: true, 
+      filesAdded,
+      message: `Downloaded ${filesAdded} attachments as a ZIP file` 
+    };
+  } catch (error) {
+    console.error('Error downloading conversation attachments:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Check if messaging configuration is set up properly
+export const checkMessagingConfig = async () => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    
+    // Call the database function to check configuration
+    const { data, error } = await supabase.rpc('check_messaging_config');
+    
+    if (error) {
+      console.error('Error checking messaging configuration:', error);
+      return { 
+        success: false, 
+        error: error.message,
+        isConfigured: false,
+        details: null 
+      };
+    }
+    
+    return { 
+      success: true, 
+      error: null,
+      isConfigured: data.status === 'Ready',
+      details: data 
+    };
+  } catch (error) {
+    console.error('Error in checkMessagingConfig:', error);
+    return { 
+      success: false, 
+      error: error.message,
+      isConfigured: false,
+      details: null 
+    };
+  }
+};
+
+// Admin function to delete a listing
+export const adminDeleteListing = async (listingId) => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      console.error('No authenticated user found');
+      return { success: false, error: { message: 'Not authenticated' } };
+    }
+    
+    // First verify the listing exists
+    const { data: listing, error: fetchError } = await supabase
+      .from('listings')
+      .select('id, title, user_id')
+      .eq('id', listingId)
+      .single();
+      
+    if (fetchError) {
+      console.error('Error fetching listing:', fetchError);
+      return { success: false, error: fetchError };
+    }
+    
+    if (!listing) {
+      console.error('Listing not found:', listingId);
+      return { success: false, error: { message: 'Listing not found' } };
+    }
+    
+    // Delete related offers
+    const { error: offersError } = await supabase
+      .from('offers')
+      .delete()
+      .eq('listing_id', listingId);
+    
+    if (offersError) {
+      console.error('Error deleting offers:', offersError);
+      // Continue anyway
+    }
+    
+    // Delete saved listings
+    const { error: savedError } = await supabase
+      .from('saved_listings')
+      .delete()
+      .eq('listing_id', listingId);
+      
+    if (savedError) {
+      console.error('Error deleting saved listings:', savedError);
+      // Continue anyway
+    }
+    
+    // Delete the listing itself
+    const { error: deleteError } = await supabase
+      .from('listings')
+      .delete()
+      .eq('id', listingId);
+      
+    if (deleteError) {
+      console.error('Error deleting listing:', deleteError);
+      return { success: false, error: deleteError };
+    }
+    
+    return { 
+      success: true,
+      listing
+    };
+  } catch (error) {
+    console.error('Error in adminDeleteListing:', error);
+    return { success: false, error };
+  }
+};
+
+// Get seller statistics
+export const getSellerStatistics = async (sellerId) => {
+  try {
+    const userId = sellerId || (await supabase.auth.getUser()).data.user?.id;
+    
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    
+    // Get listings count
+    const { data: listings, error: listingsError } = await supabase
+      .from('listings')
+      .select('id, status, created_at, price')
+      .eq('seller_id', userId);
+    
+    if (listingsError) throw listingsError;
+    
+    // Get reviews
+    const { data: reviews, error: reviewsError } = await supabase
+      .from('reviews')
+      .select('id, rating')
+      .eq('seller_id', userId);
+    
+    if (reviewsError) throw reviewsError;
+    
+    // Get sales data from completed offers
+    const { data: sales, error: salesError } = await supabase
+      .from('offers')
+      .select('id, amount, status, created_at')
+      .eq('seller_id', userId)
+      .eq('status', 'accepted');
+    
+    if (salesError) throw salesError;
+    
+    // Calculate statistics
+    const totalListings = listings?.length || 0;
+    const activeListings = listings?.filter(l => l.status === 'active').length || 0;
+    const soldListings = listings?.filter(l => l.status === 'sold').length || 0;
+    
+    const totalSales = sales?.length || 0;
+    const salesVolume = sales?.reduce((sum, sale) => sum + (parseFloat(sale.amount) || 0), 0) || 0;
+    
+    const averageRating = reviews?.length 
+      ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length
+      : 0;
+    
+    // Get 30-day metrics
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString();
+    
+    const recentListings = listings?.filter(l => l.created_at >= thirtyDaysAgoStr).length || 0;
+    const recentSales = sales?.filter(s => s.created_at >= thirtyDaysAgoStr).length || 0;
+    const recentSalesVolume = sales
+      ?.filter(s => s.created_at >= thirtyDaysAgoStr)
+      .reduce((sum, sale) => sum + (parseFloat(sale.amount) || 0), 0) || 0;
+    
+    return {
+      data: {
+        totalListings,
+        activeListings,
+        soldListings,
+        totalSales,
+        salesVolume,
+        averageRating,
+        reviewCount: reviews?.length || 0,
+        recentListings,
+        recentSales,
+        recentSalesVolume,
+        completionRate: totalListings > 0 ? (soldListings / totalListings) * 100 : 0
+      },
+      error: null
+    };
+  } catch (error) {
+    console.error('Error in getSellerStatistics:', error);
+    return { data: null, error };
+  }
+};
+
+// Create test conversations for development and testing
+export const createTestConversations = async (count = 5) => {
+  try {
+    console.log(`Creating ${count} test conversations...`);
+    
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    
+    // Get some random users to have conversations with
+    const { data: randomUsers, error: usersError } = await supabase
+      .from('users')
+      .select('id, name, avatar_url')
+      .neq('id', user.id)
+      .limit(count);
+    
+    if (usersError) {
+      throw new Error(`Failed to get random users: ${usersError.message}`);
+    }
+    
+    if (!randomUsers || randomUsers.length === 0) {
+      throw new Error('No users found to create test conversations with');
+    }
+    
+    // Get some random listings to associate with conversations
+    const { data: randomListings, error: listingsError } = await supabase
+      .from('listings')
+      .select('id, title, price, images')
+      .limit(count);
+    
+    if (listingsError) {
+      throw new Error(`Failed to get random listings: ${listingsError.message}`);
+    }
+    
+    // Create test messages content
+    const messageTemplates = [
+      "Hi there, is this still available?",
+      "I'm interested in this item. Is the price negotiable?",
+      "Could you tell me more about the condition?",
+      "Do you offer delivery or is it pickup only?",
+      "I'd like to buy this. When can we meet?",
+      "Does it come with the original packaging?",
+      "How long have you owned this?",
+      "Would you accept $PRICE_LOWER for it?",
+      "Are there any defects or issues I should know about?",
+      "Do you have more pictures you could share?"
+    ];
+    
+    const responseTemplates = [
+      "Yes, it's still available!",
+      "The price is somewhat negotiable. What did you have in mind?",
+      "It's in excellent condition, barely used.",
+      "I prefer local pickup, but we can discuss delivery options.",
+      "Great! I'm available evenings and weekends for meetup.",
+      "Yes, I have the original box and all accessories.",
+      "I've had it for about a year, but it's in great shape.",
+      "I could go down to $PRICE_LOWER, but that's my best offer.",
+      "No issues at all, works perfectly.",
+      "Sure, I can send more pictures. What specifically would you like to see?"
+    ];
+    
+    // Create conversations and messages
+    const results = [];
+    
+    for (let i = 0; i < Math.min(count, randomUsers.length); i++) {
+      const otherUser = randomUsers[i];
+      const listing = randomListings && randomListings.length > i ? randomListings[i] : null;
+      
+      // Create a conversation
+      const { data: conversation, error: convError } = await supabase.rpc(
+        'create_conversation_with_participants',
+        {
+          user1_uuid: user.id,
+          user2_uuid: otherUser.id,
+          listing_uuid: listing?.id || null
+        }
+      );
+      
+      if (convError) {
+        console.error(`Error creating conversation ${i+1}:`, convError);
+        continue;
+      }
+      
+      if (!conversation || !conversation.success) {
+        console.error(`Failed to create conversation ${i+1}:`, conversation?.error || 'Unknown error');
+        continue;
+      }
+      
+      const conversationId = conversation.conversation_id;
+      
+      // Send some test messages
+      const messageCount = 3 + Math.floor(Math.random() * 8); // 3-10 messages
+      const initialTimestamp = new Date(Date.now() - (24 * 60 * 60 * 1000)); // Start from 24h ago
+      
+      for (let j = 0; j < messageCount; j++) {
+        // Alternate between current user and other user
+        const sender = j % 2 === 0 ? user.id : otherUser.id;
+        
+        // Choose a random message template
+        const templates = sender === user.id ? messageTemplates : responseTemplates;
+        let content = templates[Math.floor(Math.random() * templates.length)];
+        
+        // Replace price placeholder if it exists
+        if (content.includes('PRICE_LOWER') && listing) {
+          const lowerPrice = Math.floor(parseFloat(listing.price) * 0.8);
+          content = content.replace('PRICE_LOWER', lowerPrice);
+        }
+        
+        // Calculate timestamp with some random interval between messages
+        const messageTime = new Date(initialTimestamp.getTime() + (j * (30 + Math.random() * 60) * 60 * 1000));
+        
+        // Insert the message directly to bypass restrictions and get proper timestamps
+        const { error: msgError } = await supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversationId,
+            sender_id: sender,
+            content: content,
+            created_at: messageTime.toISOString(),
+            read: sender !== user.id // Messages from others are marked as read
+          });
+        
+        if (msgError) {
+          console.error(`Error creating message ${j+1} in conversation ${i+1}:`, msgError);
+        }
+      }
+      
+      // Update conversation's updated_at to match the last message
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+      
+      results.push({
+        conversationId,
+        otherUser: otherUser.name,
+        listing: listing?.title || 'No listing',
+        messageCount
+      });
+    }
+    
+    console.log(`Successfully created ${results.length} test conversations`);
+    return { success: true, data: results };
+  } catch (error) {
+    console.error('Error creating test conversations:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Function to help users diagnose bucket issues
+export const checkStorageBuckets = async () => {
+  try {
+    // Check authentication
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { success: false, error: 'Not authenticated' };
+    }
+    
+    // Try to list buckets
+    const { success, data, error } = await listStorageBuckets();
+    
+    if (!success) {
+      return { 
+        success: false, 
+        error: error?.message || 'Failed to list buckets',
+        details: 'You may not have permission to list storage buckets.'
+      };
+    }
+    
+    if (!data || data.length === 0) {
+      return { 
+        success: true, 
+        buckets: [],
+        message: 'No storage buckets found. This may indicate a configuration issue.'
+      };
+    }
+    
+    // For each bucket, try to list the root contents
+    const bucketsWithContent = await Promise.all(
+      data.map(async (bucket) => {
+        try {
+          const { data: files, error: listError } = await supabase.storage
+            .from(bucket.name)
+            .list('', { limit: 5 });
+            
+          return {
+            name: bucket.name,
+            id: bucket.id,
+            accessible: !listError,
+            fileCount: files?.length || 0,
+            error: listError?.message
+          };
+        } catch (e) {
+          return {
+            name: bucket.name,
+            id: bucket.id,
+            accessible: false,
+            error: e.message
+          };
+        }
+      })
+    );
+    
+    return { 
+      success: true, 
+      buckets: bucketsWithContent,
+      message: `Found ${bucketsWithContent.length} storage buckets.`
+    };
+  } catch (error) {
+    console.error('Error checking storage buckets:', error);
+    return { 
+      success: false, 
+      error: error.message || 'Unknown error checking buckets',
+      details: error.toString()
+    };
+  }
+};
+
+// Function to list files in a storage bucket 
+export const listStorageFiles = async (bucketName, prefix = '') => {
+  try {
+    if (!bucketName) {
+      throw new Error('Bucket name is required');
+    }
+    
+    console.log(`Listing files in bucket: ${bucketName}, prefix: ${prefix || 'root'}`);
+    
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .list(prefix, {
+        limit: 100,
+        offset: 0,
+        sortBy: { column: 'name', order: 'asc' }
+      });
+    
+    if (error) {
+      console.error(`Error listing files in bucket ${bucketName}:`, error);
+      return { 
+        success: false, 
+        error: error.message || `Failed to list files in bucket ${bucketName}` 
+      };
+    }
+    
+    // For each folder, get a file count
+    let filesWithInfo = [];
+    
+    for (const item of data) {
+      if (item.id) {
+        // It's a file
+        filesWithInfo.push({
+          ...item,
+          path: prefix ? `${prefix}/${item.name}` : item.name,
+          type: 'file'
+        });
+      } else {
+        // It's a folder, get a count of files inside
+        try {
+          const folderPath = prefix ? `${prefix}/${item.name}` : item.name;
+          const { data: folderContents } = await supabase.storage
+            .from(bucketName)
+            .list(folderPath, { limit: 5 });
+          
+          filesWithInfo.push({
+            ...item,
+            path: folderPath,
+            type: 'folder',
+            itemCount: folderContents?.length || 0,
+            hasFiles: (folderContents?.length || 0) > 0
+          });
+        } catch (e) {
+          filesWithInfo.push({
+            ...item,
+            path: prefix ? `${prefix}/${item.name}` : item.name,
+            type: 'folder',
+            error: e.message
+          });
+        }
+      }
+    }
+    
+    return { 
+      success: true, 
+      data: filesWithInfo,
+      bucketName,
+      prefix
+    };
+  } catch (error) {
+    console.error('Error in listStorageFiles:', error);
+    return { 
+      success: false, 
+      error: error.message || 'Unknown error listing storage files'
+    };
+  }
+};
+
+// Add a function to list all attachments from the database
+export const listMessageAttachments = async (limit = 20) => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      throw new Error('User not authenticated');
+    }
+    
+    // Query the message_attachments table
+    const { data, error } = await supabase
+      .from('message_attachments')
+      .select('*, message:message_id(id, content, sender_id, receiver_id)')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    
+    if (error) {
+      throw new Error(`Failed to fetch message attachments: ${error.message}`);
+    }
+    
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error in listMessageAttachments:', error);
+    return { 
+      success: false, 
+      error: error.message || 'Unknown error listing message attachments'
+    };
+  }
+};
+
+// Function to check if a table exists and get its structure
+export const checkTableStructure = async (tableName) => {
+  try {
+    // First check if the table exists by trying to get a single row
+    const { error: tableCheckError } = await supabase
+      .from(tableName)
+      .select('*')
+      .limit(1);
+      
+    // If we get an error about the table not existing
+    if (tableCheckError && 
+       (tableCheckError.message.includes('does not exist') || 
+        tableCheckError.code === '42P01')) {
+      return { 
+        success: false, 
+        exists: false, 
+        error: `Table '${tableName}' does not exist` 
+      };
+    }
+    
+    // Now get the table structure
+    const { data, error } = await supabase.rpc('get_table_info', { 
+      table_name: tableName 
+    });
+    
+    if (error) {
+      // Try alternative approach if RPC fails
+      console.log(`RPC get_table_info failed: ${error.message}. Trying direct query.`);
+      
+      // Get column info through a direct query
+      const { data: columns, error: columnsError } = await supabase
+        .from('information_schema.columns')
+        .select('column_name, data_type, is_nullable')
+        .eq('table_name', tableName);
+      
+      if (columnsError) {
+        return { 
+          success: false, 
+          exists: true, // Table exists but we couldn't get its structure
+          error: columnsError.message 
+        };
+      }
+      
+      return { 
+        success: true, 
+        exists: true,
+        columns: columns || [],
+        source: 'direct_query'
+      };
+    }
+    
+    return { 
+      success: true, 
+      exists: true,
+      columns: data || [],
+      source: 'rpc'
+    };
+  } catch (error) {
+    console.error(`Error checking table structure for ${tableName}:`, error);
+    return { 
+      success: false, 
+      error: error.message || `Unknown error checking table structure` 
+    };
   }
 };

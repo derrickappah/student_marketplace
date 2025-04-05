@@ -1207,6 +1207,23 @@ const AdminDashboard = () => {
                 
                 <ListItem 
                   button 
+                  onClick={() => navigate('/admin/storage-diagnostics')}
+                  sx={{ borderRadius: 1, mb: 1 }}
+                >
+                  <ListItemAvatar>
+                    <Avatar sx={{ bgcolor: theme.palette.warning.light }}>
+                      <SettingsIcon />
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText 
+                    primary="Storage Diagnostics" 
+                    secondary="Check storage buckets and diagnose attachment issues"
+                  />
+                  <ArrowForwardIcon color="action" />
+                </ListItem>
+                
+                <ListItem 
+                  button 
                   onClick={() => navigate('/admin/analytics')}
                   sx={{ borderRadius: 1 }}
                 >
