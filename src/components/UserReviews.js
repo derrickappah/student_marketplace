@@ -34,7 +34,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getUserReviews, getUserRating, createReview, updateReview, deleteReview, supabase } from '../services/supabase';
 import { formatDistanceToNow } from 'date-fns';
 
-const UserReviews = ({ userId, userName }) => {
+const UserReviews = ({ userId, listingId, reviewType = 'seller', userName }) => {
   const theme = useTheme();
   const { user } = useAuth();
   const [reviews, setReviews] = useState([]);
@@ -84,8 +84,8 @@ const UserReviews = ({ userId, userName }) => {
       setError('');
       try {
         const [reviewsData, ratingData] = await Promise.all([
-          getUserReviews(userId),
-          getUserRating(userId),
+          getUserReviews(userId, listingId, reviewType),
+          getUserRating(userId, listingId, reviewType),
         ]);
         
         console.log('>>> Reviews loaded successfully:', reviewsData);
@@ -119,7 +119,7 @@ const UserReviews = ({ userId, userName }) => {
     if (userId) {
       loadReviewData();
     }
-  }, [userId]);
+  }, [userId, listingId, reviewType]);
 
   const handleReviewChange = (e) => {
     const { name, value } = e.target;
@@ -149,14 +149,15 @@ const UserReviews = ({ userId, userName }) => {
     try {
       const { data: createdReview } = await createReview({
         sellerId: userId,
-        listingId: null,
+        listingId: listingId,
         rating: newReview.rating,
-        comment: newReview.comment
+        comment: newReview.comment,
+        reviewType: reviewType
       });
       
       const [reviewsData, ratingData] = await Promise.all([
-        getUserReviews(userId),
-        getUserRating(userId),
+        getUserReviews(userId, listingId, reviewType),
+        getUserRating(userId, listingId, reviewType),
       ]);
       
       setReviews(Array.isArray(reviewsData.data) ? reviewsData.data : []);
@@ -311,8 +312,8 @@ const UserReviews = ({ userId, userName }) => {
     setError('');
     
     Promise.all([
-          getUserReviews(userId),
-          getUserRating(userId),
+          getUserReviews(userId, listingId, reviewType),
+          getUserRating(userId, listingId, reviewType),
     ]).then(([reviewsData, ratingData]) => {
         setReviews(Array.isArray(reviewsData.data) ? reviewsData.data : []);
         setRating({
@@ -717,4 +718,4 @@ const UserReviews = ({ userId, userName }) => {
   );
 };
 
-export default UserReviews; 
+export default UserReviews;

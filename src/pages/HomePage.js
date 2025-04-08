@@ -31,12 +31,14 @@ import {
   Security as SecurityIcon,
   SupportAgent as SupportIcon,
   KeyboardArrowRight as ArrowRightIcon,
-  Category as CategoryIcon
+  Category as CategoryIcon,
+  ChevronRight as ChevronRightIcon,
 } from '@mui/icons-material';
 import ListingCard from '../components/ListingCard';
 import FeaturedListings from '../components/FeaturedListings';
 import { getCategories } from '../services/supabase';
 import { getCategoryIcon, getCategoryColor } from '../utils/categoryIcons';
+import { useAuth } from '../contexts/AuthContext';
 
 const renderCategoryIcon = (categoryName, options = {}) => {
   const { size = 30, useColor = false } = options;
@@ -65,6 +67,7 @@ const HomePage = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isMedium = useMediaQuery(theme.breakpoints.down('md'));
+  const { user } = useAuth();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchParams, setSearchParams] = useState({
@@ -481,138 +484,140 @@ const HomePage = () => {
 
       <Container maxWidth="lg" sx={{ mt: { xs: -6, md: -8 }, position: 'relative', zIndex: 4 }}>
         {/* Features Section - Redesigned */}
-        <Grid container spacing={4} sx={{ mb: 8 }}>
-          {[
-            {
-              icon: <SchoolIcon sx={{ fontSize: 40 }} />,
-              title: 'Campus Community',
-              description: 'Connect with students from your university community to buy, sell, and trade items.',
-              color: '#2563EB',
-              gradient: 'linear-gradient(135deg, #2563EB, #60A5FA)'
-            },
-            {
-              icon: <OfferIcon sx={{ fontSize: 40 }} />,
-              title: 'Make Offers',
-              description: 'Negotiate prices and make offers directly to sellers for the best deals.',
-              color: '#EC4899',
-              gradient: 'linear-gradient(135deg, #DB2777, #F472B6)'
-            },
-            {
-              icon: <SecurityIcon sx={{ fontSize: 40 }} />,
-              title: 'Secure Transactions',
-              description: 'Our platform ensures safe and secure interactions between buyers and sellers.',
-              color: '#10B981',
-              gradient: 'linear-gradient(135deg, #059669, #34D399)'
-            },
-            {
-              icon: <SupportIcon sx={{ fontSize: 40 }} />,
-              title: 'Community Support',
-              description: 'Get help anytime with our dedicated support team and helpful resources.',
-              color: '#F59E0B',
-              gradient: 'linear-gradient(135deg, #D97706, #FBBF24)'
-            }
-          ].map((feature, index) => (
-            <Grid item xs={12} sm={6} md={3} key={index}>
-              <Card
-                elevation={0}
-                sx={{
-                  borderRadius: 4,
-                  height: '100%',
-                  background: theme.palette.mode === 'dark' 
-                    ? alpha(feature.color, 0.1)
-                    : 'white',
-                  border: theme.palette.mode === 'dark' 
-                    ? `1px solid ${alpha(feature.color, 0.3)}`
-                    : `1px solid ${alpha(feature.color, 0.1)}`,
-                  transition: 'all 0.3s',
-                  overflow: 'visible',
-                  '&:hover': {
-                    transform: 'translateY(-8px)',
-                    boxShadow: `0 15px 30px ${alpha(feature.color, 0.2)}`,
-                    borderColor: alpha(feature.color, 0.5),
-                  },
-                  position: 'relative'
-                }}
-              >
-                <CardContent sx={{ 
-                  p: 4, 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  alignItems: 'flex-start', 
-                  height: '100%'
-                }}>
-                  <Box
-                    sx={{
-                      mb: 3,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 70,
-                      height: 70,
-                      borderRadius: '20px',
-                      background: feature.gradient,
-                      color: 'white',
-                      boxShadow: `0 10px 20px ${alpha(feature.color, 0.3)}`,
-                      transition: 'all 0.3s',
-                      '&:hover': {
-                        transform: 'rotate(5deg) scale(1.05)',
-                      },
-                      position: 'relative',
-                      overflow: 'hidden',
-                      '&::after': {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        background: 'linear-gradient(45deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 70%)',
-                      }
-                    }}
-                  >
-                    {feature.icon}
-                  </Box>
-                  <Typography 
-                    variant="h6" 
-                    component="h3" 
-                    gutterBottom
-                    sx={{ 
-                      fontWeight: 700,
-                      color: theme.palette.mode === 'dark' ? 'white' : feature.color
-                    }}
-                  >
-                    {feature.title}
-                  </Typography>
-                  <Typography 
-                    variant="body2" 
-                    color="text.secondary"
-                    sx={{ mb: 2, flexGrow: 1 }}
-                  >
-                    {feature.description}
-                  </Typography>
-                  <Button 
-                    color="inherit"
-                    size="small"
-                    endIcon={<ArrowRightIcon />}
-                    sx={{ 
-                      mt: 'auto', 
-                      fontWeight: 600, 
-                      color: feature.color,
-                      '&:hover': {
-                        backgroundColor: alpha(feature.color, 0.08),
-                      }
-                    }}
-                    onClick={() => navigate('/help-center')}
-                  >
-                    Learn more
-                  </Button>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
+        {!user && (
+          <Grid container spacing={4} sx={{ mb: 8 }}>
+            {[
+              {
+                icon: <SchoolIcon sx={{ fontSize: 40 }} />,
+                title: 'Campus Community',
+                description: 'Connect with students from your university community to buy, sell, and trade items.',
+                color: '#2563EB',
+                gradient: 'linear-gradient(135deg, #2563EB, #60A5FA)'
+              },
+              {
+                icon: <OfferIcon sx={{ fontSize: 40 }} />,
+                title: 'Make Offers',
+                description: 'Negotiate prices and make offers directly to sellers for the best deals.',
+                color: '#EC4899',
+                gradient: 'linear-gradient(135deg, #DB2777, #F472B6)'
+              },
+              {
+                icon: <SecurityIcon sx={{ fontSize: 40 }} />,
+                title: 'Secure Transactions',
+                description: 'Our platform ensures safe and secure interactions between buyers and sellers.',
+                color: '#10B981',
+                gradient: 'linear-gradient(135deg, #059669, #34D399)'
+              },
+              {
+                icon: <SupportIcon sx={{ fontSize: 40 }} />,
+                title: 'Community Support',
+                description: 'Get help anytime with our dedicated support team and helpful resources.',
+                color: '#F59E0B',
+                gradient: 'linear-gradient(135deg, #D97706, #FBBF24)'
+              }
+            ].map((feature, index) => (
+              <Grid item xs={12} sm={6} md={3} key={index}>
+                <Card
+                  elevation={0}
+                  sx={{
+                    borderRadius: 4,
+                    height: '100%',
+                    background: theme.palette.mode === 'dark' 
+                      ? alpha(feature.color, 0.1)
+                      : 'white',
+                    border: theme.palette.mode === 'dark' 
+                      ? `1px solid ${alpha(feature.color, 0.3)}`
+                      : `1px solid ${alpha(feature.color, 0.1)}`,
+                    transition: 'all 0.3s',
+                    overflow: 'visible',
+                    '&:hover': {
+                      transform: 'translateY(-8px)',
+                      boxShadow: `0 15px 30px ${alpha(feature.color, 0.2)}`,
+                      borderColor: alpha(feature.color, 0.5),
+                    },
+                    position: 'relative'
+                  }}
+                >
+                  <CardContent sx={{ 
+                    p: 4, 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'flex-start', 
+                    height: '100%'
+                  }}>
+                    <Box
+                      sx={{
+                        mb: 3,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 70,
+                        height: 70,
+                        borderRadius: '20px',
+                        background: feature.gradient,
+                        color: 'white',
+                        boxShadow: `0 10px 20px ${alpha(feature.color, 0.3)}`,
+                        transition: 'all 0.3s',
+                        '&:hover': {
+                          transform: 'rotate(5deg) scale(1.05)',
+                        },
+                        position: 'relative',
+                        overflow: 'hidden',
+                        '&::after': {
+                          content: '""',
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          background: 'linear-gradient(45deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 70%)',
+                        }
+                      }}
+                    >
+                      {feature.icon}
+                    </Box>
+                    <Typography 
+                      variant="h6" 
+                      component="h3" 
+                      gutterBottom
+                      sx={{ 
+                        fontWeight: 700,
+                        color: theme.palette.mode === 'dark' ? 'white' : feature.color
+                      }}
+                    >
+                      {feature.title}
+                    </Typography>
+                    <Typography 
+                      variant="body2" 
+                      color="text.secondary"
+                      sx={{ mb: 2, flexGrow: 1 }}
+                    >
+                      {feature.description}
+                    </Typography>
+                    <Button 
+                      color="inherit"
+                      size="small"
+                      endIcon={<ArrowRightIcon />}
+                      sx={{ 
+                        mt: 'auto', 
+                        fontWeight: 600, 
+                        color: feature.color,
+                        '&:hover': {
+                          backgroundColor: alpha(feature.color, 0.08),
+                        }
+                      }}
+                      onClick={() => navigate('/help-center')}
+                    >
+                      Learn more
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        )}
         
-        {/* Categories Showcase - Enhanced */}
+        {/* Categories Showcase - Enhanced as Slider */}
         <Box sx={{ mb: 8 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
             <Typography 
@@ -642,84 +647,178 @@ const HomePage = () => {
             </Button>
           </Box>
           
-          <Grid container spacing={2}>
-            {categories.slice(0, 8).map((category, index) => (
-              <Grid item xs={6} sm={4} md={3} key={index}>
-                <Card
-                  onClick={() => {
-                    navigate(`/search?category=${category.id || category.name}`);
-                  }}
+          {/* Category Slider */}
+          <Box sx={{ position: 'relative', overflow: 'hidden', px: 1 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                overflowX: 'auto',
+                scrollBehavior: 'smooth',
+                WebkitOverflowScrolling: 'touch',
+                msOverflowStyle: 'none',  /* IE and Edge */
+                scrollbarWidth: 'none',  /* Firefox */
+                '&::-webkit-scrollbar': { display: 'none' }, /* Chrome, Safari, Opera */
+                gap: 2,
+                py: 1,
+                px: 0.5,
+                '-webkit-overflow-scrolling': 'touch',
+              }}
+              className="category-slider"
+            >
+              {categories.map((category, index) => (
+                <Box
+                  key={index}
                   sx={{
-                    borderRadius: 4,
-                    height: '100%',
-                    textAlign: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s',
-                    '&:hover': {
-                      transform: 'translateY(-5px)',
-                      boxShadow: '0 12px 20px rgba(0,0,0,0.1)',
-                      borderColor: getCategoryColor(category.name),
-                    },
-                    background: theme.palette.mode === 'dark' 
-                      ? alpha(theme.palette.background.paper, 0.6)
-                      : 'white',
-                    border: theme.palette.mode === 'dark'
-                      ? `1px solid ${alpha(theme.palette.primary.main, 0.2)}`
-                      : `1px solid ${alpha('#e0e0e0', 0.8)}`,
-                    overflow: 'hidden',
-                    position: 'relative',
+                    minWidth: { xs: '140px', sm: '160px' },
+                    flexShrink: 0,
                   }}
                 >
-                  <CardContent sx={{ p: 3 }}>
-                    <Box 
-                      sx={{ 
-                        mb: 2,
-                        height: 60,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                    >
+                  <Card
+                    onClick={() => {
+                      navigate(`/search?category=${category.id || category.name}`);
+                    }}
+                    sx={{
+                      borderRadius: 3,
+                      height: '100%',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s',
+                      '&:hover': {
+                        transform: 'translateY(-5px)',
+                        boxShadow: '0 8px 16px rgba(0,0,0,0.1)',
+                        borderColor: getCategoryColor(category.name),
+                      },
+                      background: theme.palette.mode === 'dark' 
+                        ? alpha(theme.palette.background.paper, 0.6)
+                        : 'white',
+                      border: theme.palette.mode === 'dark'
+                        ? `1px solid ${alpha(theme.palette.primary.main, 0.2)}`
+                        : `1px solid ${alpha('#e0e0e0', 0.8)}`,
+                      overflow: 'hidden',
+                      position: 'relative',
+                    }}
+                  >
+                    <CardContent sx={{ p: 2 }}>
                       <Box 
-                        sx={{
-                          width: 60,
-                          height: 60,
-                          borderRadius: '16px',
+                        sx={{ 
+                          mb: 1.5,
+                          height: 50,
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center',
-                          backgroundColor: alpha(getCategoryColor(category.name), 0.15),
-                          color: getCategoryColor(category.name),
-                          transition: 'all 0.3s ease',
-                          '&:hover': {
-                            transform: 'scale(1.1) rotate(5deg)',
-                          }
+                          justifyContent: 'center'
                         }}
                       >
-                        {renderCategoryIcon(category.name, { size: 30 })}
+                        <Box 
+                          sx={{
+                            width: 50,
+                            height: 50,
+                            borderRadius: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: alpha(getCategoryColor(category.name), 0.15),
+                            color: getCategoryColor(category.name),
+                            transition: 'all 0.3s ease',
+                            '&:hover': {
+                              transform: 'scale(1.1) rotate(5deg)',
+                            }
+                          }}
+                        >
+                          {renderCategoryIcon(category.name, { size: 24 })}
+                        </Box>
                       </Box>
-                    </Box>
-                    <Typography 
-                      variant="body1" 
-                      fontWeight="600"
-                      sx={{ mb: 0.5 }}
-                    >
-                      {category.name}
-                    </Typography>
-                    {/* Display item count if available */}
-                    {category.item_count && (
                       <Typography 
-                        variant="caption" 
-                        color="text.secondary"
+                        variant="body2" 
+                        fontWeight="600"
+                        sx={{ mb: 0.5 }}
                       >
-                        {category.item_count} listings
+                        {category.name}
                       </Typography>
-                    )}
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
+                      {/* Display item count if available */}
+                      {category.item_count && (
+                        <Typography 
+                          variant="caption" 
+                          color="text.secondary"
+                          sx={{ fontSize: '0.7rem' }}
+                        >
+                          {category.item_count} listings
+                        </Typography>
+                      )}
+                    </CardContent>
+                  </Card>
+                </Box>
+              ))}
+            </Box>
+            
+            {/* Navigation Arrows */}
+            <Box
+              sx={{
+                position: 'absolute',
+                top: '50%',
+                left: 0,
+                transform: 'translateY(-50%)',
+                zIndex: 2,
+                display: { xs: 'none', md: 'block' }
+              }}
+            >
+              <Button
+                onClick={() => {
+                  const slider = document.querySelector('.category-slider');
+                  if (slider) {
+                    slider.scrollBy({ left: -200, behavior: 'smooth' });
+                  }
+                }}
+                sx={{
+                  minWidth: '40px',
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: theme.palette.background.paper,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  '&:hover': {
+                    backgroundColor: theme.palette.background.paper,
+                    boxShadow: '0 6px 16px rgba(0,0,0,0.15)',
+                  }
+                }}
+              >
+                <ArrowRightIcon sx={{ transform: 'rotate(180deg)' }} />
+              </Button>
+            </Box>
+            
+            <Box
+              sx={{
+                position: 'absolute',
+                top: '50%',
+                right: 0,
+                transform: 'translateY(-50%)',
+                zIndex: 2,
+                display: { xs: 'none', md: 'block' }
+              }}
+            >
+              <Button
+                onClick={() => {
+                  const slider = document.querySelector('.category-slider');
+                  if (slider) {
+                    slider.scrollBy({ left: 200, behavior: 'smooth' });
+                  }
+                }}
+                sx={{
+                  minWidth: '40px',
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: theme.palette.background.paper,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                  '&:hover': {
+                    backgroundColor: theme.palette.background.paper,
+                    boxShadow: '0 6px 16px rgba(0,0,0,0.15)',
+                  }
+                }}
+              >
+                <ArrowRightIcon />
+              </Button>
+            </Box>
+          </Box>
         </Box>
         
         {/* Featured Listings Section */}
@@ -914,4 +1013,4 @@ const HomePage = () => {
   );
 };
 
-export default HomePage; 
+export default HomePage;

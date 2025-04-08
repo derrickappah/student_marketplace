@@ -30,16 +30,17 @@ BEGIN
       'conversation_id', cp.conversation_id,
       'user', jsonb_build_object(
         'id', u.id,
-        'name', u.name,
-        'email', u.email,
-        'university', u.university,
-        'avatar_url', u.avatar_url
+        'name', COALESCE(u.name, 'User ' || substring(u.id::text, 1, 8)),
+        'email', COALESCE(u.email, ''),
+        'university', COALESCE(u.university, ''),
+        'avatar_url', COALESCE(u.avatar_url, ''),
+        'status', COALESCE((SELECT status FROM user_status WHERE user_id = u.id), 'offline')
       )
     )
   )
   INTO participants_json
   FROM conversation_participants cp
-  JOIN users u ON cp.user_id = u.id
+  LEFT JOIN users u ON cp.user_id = u.id
   WHERE cp.conversation_id = conv_id;
   
   -- Get listing details if applicable
@@ -48,7 +49,9 @@ BEGIN
       'id', l.id,
       'title', l.title,
       'price', l.price,
-      'images', l.images
+      'images', l.images,
+      'status', COALESCE(l.status, 'active'),
+      'seller_id', l.user_id
     )
     INTO listing_json
     FROM listings l

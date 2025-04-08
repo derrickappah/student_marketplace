@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo, useMemo } from 'react';
 import {
   Container,
   Paper,
@@ -67,7 +67,20 @@ import { markThreadAsRead, uploadImage } from "../services/supabase";
 import { useSnackbar } from 'notistack';
 import { useMessaging } from '../contexts/MessagingContext';
 import { supabase } from '../supabaseClient';
-import { MessageBubble, MessageAttachmentUploader, TypingIndicator } from '../components/messaging';
+import { MessageBubble, MessageAttachmentUploader, TypingIndicator, MESSAGE_STATUS, SafeImage, ListingImageGallery } from '../components/messaging';
+
+// Add debounce utility function at the top of the file, after imports
+const debounce = (func, wait) => {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+};
 
 const MessageThreadPage = () => {
   const { id: conversationId } = useParams();
@@ -198,18 +211,25 @@ const MessageThreadPage = () => {
   useEffect(() => {
     if (!conversationId) return;
     
+    // Use a single reference to track subscriptions
+    const subscriptions = [];
+    
     // Subscribe to new messages
     const messageUnsubscribe = subscribeToMessages(conversationId);
+    if (messageUnsubscribe) subscriptions.push(messageUnsubscribe);
     
     // Subscribe to typing indicators
     const typingUnsubscribe = subscribeToTypingIndicators(conversationId);
+    if (typingUnsubscribe) subscriptions.push(typingUnsubscribe);
     
     // Subscribe to read receipts
     const readReceiptUnsubscribe = subscribeToReadReceipts(conversationId);
+    if (readReceiptUnsubscribe) subscriptions.push(readReceiptUnsubscribe);
     
-    // Listen for new messages
-    const channel = supabase
-      .channel(`messages:${conversationId}`)
+    // Set up our own listener for new messages to update the UI
+    // but don't duplicate the subscribeToMessages functionality
+    const messageChannel = supabase
+      .channel(`messages-ui:${conversationId}`)
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -217,49 +237,66 @@ const MessageThreadPage = () => {
         filter: `conversation_id=eq.${conversationId}`
       }, async (payload) => {
         if (payload.new) {
+          // Don't immediately update for our own messages (reduces flickering)
+          if (payload.new.sender_id === user.id) {
+            return; // Our own messages are added optimistically already
+          }
+          
           // If this is someone else's message, mark it as delivered
-          if (payload.new.sender_id !== user.id) {
-            updateReadReceipt(conversationId, payload.new.id, 'delivered');
+          updateReadReceipt(conversationId, payload.new.id, MESSAGE_STATUS.DELIVERED);
+          
+          // If we're actively viewing, mark as read right away
+          if (document.visibilityState === 'visible' && isAtBottom) {
             markConversationAsRead(conversationId);
+          }
         
-            // Clear typing indicator for this user
-            if (typingUsers[payload.new.sender_id]) {
-              // The sender just sent a message, so they're no longer typing
-              sendTypingIndicator(conversationId, false);
-      }
+          // Clear typing indicator for this user
+          if (typingUsers[payload.new.sender_id]) {
+            // The sender just sent a message, so they're no longer typing
+            setTypingUsers(prev => {
+              const newState = { ...prev };
+              delete newState[payload.new.sender_id];
+              return newState;
+            });
           }
           
-          // Fetch sender info and attachments if any
-          if (payload.new.has_attachments) {
-            const attachments = await getMessageAttachments(payload.new.id);
-            payload.new.attachments = attachments;
-    }
-    
-          // Get sender information
-          const { data: senderData } = await supabase
-            .from('users')
-            .select('id, name, email, avatar_url')
-            .eq('id', payload.new.sender_id)
-            .single();
-            
-          if (senderData) {
-            payload.new.sender = senderData;
+          // Use a batch update approach for better performance
+          const messageWithDetails = { ...payload.new };
+          
+          // Fetch sender info and attachments in parallel
+          const [attachmentsResult, senderResult] = await Promise.all([
+            payload.new.has_attachments ? getMessageAttachments(payload.new.id) : Promise.resolve([]),
+            supabase
+              .from('users')
+              .select('id, name, email, avatar_url')
+              .eq('id', payload.new.sender_id)
+              .single()
+          ]);
+          
+          if (attachmentsResult.length > 0) {
+            messageWithDetails.attachments = attachmentsResult;
           }
           
-          // Add message to state
-          setMessages(prev => [...prev, payload.new]);
+          if (senderResult?.data) {
+            messageWithDetails.sender = senderResult.data;
+          }
+          
+          // Add message to state with a single update
+          setMessages(prev => [...prev, messageWithDetails]);
         }
       })
       .subscribe();
     
-    // Clean up subscriptions
+    // Track this subscription too
+    subscriptions.push(() => messageChannel.unsubscribe());
+    
+    // Clean up all subscriptions
     return () => {
-      channel.unsubscribe();
-      if (messageUnsubscribe) messageUnsubscribe();
-      if (typingUnsubscribe) typingUnsubscribe();
-      if (readReceiptUnsubscribe) readReceiptUnsubscribe();
+      subscriptions.forEach(unsubscribe => unsubscribe && unsubscribe());
     };
-  }, [conversationId, user.id, subscribeToMessages, subscribeToTypingIndicators, subscribeToReadReceipts, updateReadReceipt, markConversationAsRead, getMessageAttachments, typingUsers, sendTypingIndicator]);
+  }, [conversationId, user?.id, subscribeToMessages, subscribeToTypingIndicators, 
+      subscribeToReadReceipts, updateReadReceipt, markConversationAsRead, 
+      getMessageAttachments, typingUsers, isAtBottom]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -350,7 +387,7 @@ const MessageThreadPage = () => {
       // Add new message to the list optimistically
       const newMessageObject = {
         ...data,
-        status: 'sent', // For tracking message status
+        status: MESSAGE_STATUS.SENT,
         timestamp: new Date().toISOString()
       };
       
@@ -592,29 +629,58 @@ const MessageThreadPage = () => {
     }
   };
 
-  // Handle typing indicator
-  const handleTyping = () => {
-    if (!isTyping) {
-      setIsTyping(true);
-      sendTypingIndicator(conversationId, true);
-    }
-    
-    // Clear previous timeout
-    if (typingTimeout.current) {
-      clearTimeout(typingTimeout.current);
-    }
-    
-    // Set new timeout - stop typing indicator after 2 seconds of inactivity
-    typingTimeout.current = setTimeout(() => {
-      setIsTyping(false);
-      sendTypingIndicator(conversationId, false);
-    }, 2000);
-  };
+  // Debounced typing indicator
+  const handleTyping = useCallback(
+    debounce(() => {
+      if (!isTyping) {
+        setIsTyping(true);
+        sendTypingIndicator(conversationId, true);
+      }
+      
+      // Clear previous timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      // Set new timeout - stop typing indicator after 2 seconds of inactivity
+      typingTimeoutRef.current = setTimeout(() => {
+        setIsTyping(false);
+        sendTypingIndicator(conversationId, false);
+      }, 2000);
+    }, 300), // 300ms debounce time
+    [isTyping, sendTypingIndicator, conversationId]
+  );
 
   // Handle attaching files
   const handleAttachFiles = (files) => {
     setAttachments(prev => [...prev, ...files]);
   };
+
+  // Memoize the message list to prevent unnecessary re-renders
+  const MemoizedMessageBubble = memo(MessageBubble);
+
+  // Add this function inside the component to safely generate keys for temporary messages
+  const generateMessageKey = useCallback((message, index) => {
+    return message.id || `temp-message-${index}`;
+  }, []);
+
+  // Update the renderMessages function to use the safe key generator
+  const renderMessages = useMemo(() => {
+    return messages.map((message, index) => {
+      const isOwnMessage = message.sender_id === user?.id;
+      const showSender = index === 0 || messages[index - 1]?.sender_id !== message.sender_id;
+      
+      return (
+        <MemoizedMessageBubble
+          key={generateMessageKey(message, index)}
+          message={message}
+          isCurrentUser={isOwnMessage}
+          showSender={showSender && !isOwnMessage}
+          status={message.status || MESSAGE_STATUS.SENT}
+        />
+      );
+    });
+  }, [messages, user?.id, generateMessageKey]);
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 8 }}>
@@ -692,114 +758,52 @@ const MessageThreadPage = () => {
             <ArrowBackIcon />
           </IconButton>
           
-              {otherUser && (
-            <>
-              <Badge
-                overlap="circular"
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                    variant="dot"
-                    color="success"
-                    invisible={!onlineUsers[otherUser.id]}
-              >
-                <Avatar 
-                      src={otherUser.avatar_url} 
-                      alt={otherUser.name}
-                      sx={{ mr: 2, width: 40, height: 40 }}
-                    >
-                      {otherUser.name ? otherUser.name.charAt(0).toUpperCase() : '?'}
-                    </Avatar>
-              </Badge>
-                  
-                  <Box sx={{ flexGrow: 1 }}>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <Typography variant="subtitle1" fontWeight={500}>
-                        {otherUser.name}
-                  </Typography>
-                  
-                      <Button
-                        component={RouterLink}
-                        to={`/user/${otherUser.id}`}
-                      size="small"
-                        variant="text"
-                        sx={{ fontSize: '0.75rem', textTransform: 'none', ml: 1 }}
-                      >
-                        View Profile
-                      </Button>
-                    </Stack>
-                    
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      {onlineUsers[otherUser.id] ? (
-                        <>
-                          <CircleIcon sx={{ fontSize: 10, color: 'success.main', mr: 0.5 }} />
-                          <Typography variant="caption" color="text.secondary">
-                            Online
-                          </Typography>
-                        </>
-                      ) : (
-                        <Typography variant="caption" color="text.secondary">
-                          Offline
-                        </Typography>
-                  )}
-                </Box>
-                  </Box>
-                </>
-              )}
-              
-              {/* Action buttons */}
-              <Box>
-                {conversation?.listing && (
-                  <Tooltip title="View Listing">
-                    <Button
-                    component={RouterLink}
-                      to={`/listings/${conversation.listing.id}`}
-                      startIcon={<LocalOfferIcon />}
-                      variant="outlined"
-                      size="small"
-                      sx={{ mr: 1 }}
-                  >
-                      View Listing
-                    </Button>
-                  </Tooltip>
-                )}
-                
-                <Tooltip title="Report User">
-              <IconButton 
-                    color="default"
-                    component={RouterLink}
-                    to={{
-                      pathname: "/report",
-                      search: `?type=user&id=${otherUser?.id}`
-                }}
-              >
-                    <FlagIcon />
-              </IconButton>
-                </Tooltip>
-              </Box>
-        </Box>
+          {/* User Avatar with Online Status */}
+          <Badge
+            overlap="circular"
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            variant="dot"
+            color={otherUser?.status === 'online' ? 'success' : 'default'}
+            invisible={otherUser?.status !== 'online'}
+            sx={{ mr: 2 }}
+          >
+            <Avatar 
+              src={otherUser?.avatar_url} 
+              alt={otherUser?.name || 'User'}
+              sx={{ width: 40, height: 40 }}
+            >
+              {(otherUser?.name || 'U').charAt(0)}
+            </Avatar>
+          </Badge>
+          
+          <Box>
+            <Typography variant="subtitle1" fontWeight={500}>
+              {otherUser?.name || `User ${(otherUser?.id || '').substring(0, 8)}`}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {otherUser?.status === 'online' ? 'Online' : 'Offline'}
+            </Typography>
+          </Box>
+            </Box>
         
             {/* Listing info if applicable */}
             {conversation?.listing && (
-        <Box 
-          sx={{ 
+              <Box 
+                sx={{ 
                   p: 2, 
                   borderBottom: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
                   background: alpha(theme.palette.background.default, 0.4),
-            display: 'flex',
+                  display: 'flex',
                   alignItems: 'center'
                 }}
               >
-                <Box
-                  component="img"
-                  src={conversation.listing.images || 'https://via.placeholder.com/100'}
-                  alt={conversation.listing.title}
-                  sx={{ 
-                    width: 60, 
-                    height: 60, 
-                    borderRadius: 1, 
-                    objectFit: 'cover',
-                    mr: 2 
-                  }}
-                />
+                <Box sx={{ width: 60, height: 60, mr: 2 }}>
+                  <ListingImageGallery
+                    images={conversation.listing.images}
+                    alt={conversation.listing.title}
+                    sx={{ width: '100%', height: '100%' }}
+                  />
+                </Box>
                 
                 <Box sx={{ flexGrow: 1 }}>
                   <Typography variant="subtitle2">
@@ -807,7 +811,7 @@ const MessageThreadPage = () => {
                   </Typography>
                   
                   <Typography variant="body2" color="text.secondary" gutterBottom>
-                    {conversation.listing.price ? `$${parseFloat(conversation.listing.price).toFixed(2)}` : 'Price not specified'}
+                    {conversation.listing.price ? `GHC ${parseFloat(conversation.listing.price).toFixed(2)}` : 'Price not specified'}
                   </Typography>
                   
                   <Typography variant="caption" color="text.secondary">
@@ -816,7 +820,7 @@ const MessageThreadPage = () => {
                       fontWeight: 500
                     }}>
                       {conversation.listing.status?.charAt(0).toUpperCase() + conversation.listing.status?.slice(1) || 'Unknown'}
-                  </Box>
+                    </Box>
                   </Typography>
                 </Box>
                 
@@ -865,36 +869,20 @@ const MessageThreadPage = () => {
             </Box>
           ) : (
             <>
-              {messages.map((message, index) => {
-                    const isOwnMessage = message.sender_id === user.id;
-                    const showSender = index === 0 || messages[index - 1]?.sender_id !== message.sender_id;
-                
-                return (
-                      <MessageBubble
-                        key={message.id}
-                        message={message}
-                        isOwnMessage={isOwnMessage}
-                        showSender={showSender && !isOwnMessage}
-                        sender={message.sender}
-                        attachments={message.attachments}
-                        readReceipts={readReceipts[message.id]}
-                        participants={conversation?.participants}
-                            />
-                    );
-                  })}
-                  
-                  {/* Typing indicator */}
-                  {Object.keys(typingUsers).length > 0 && (
-                    <TypingIndicator 
-                      typingUsers={Object.keys(typingUsers)}
-                      usersMap={Object.fromEntries(
-                        conversation?.participants
-                          .filter(p => p.user_id !== user.id)
-                          .map(p => [p.user_id, p.user]) || []
-                      )}
-                    />
+              {renderMessages}
+              
+              {/* Typing indicator */}
+              {Object.keys(typingUsers).length > 0 && (
+                <TypingIndicator 
+                  typingUsers={Object.keys(typingUsers)}
+                  usersMap={Object.fromEntries(
+                    conversation?.participants
+                      ?.filter(p => p.user_id !== user?.id)
+                      .map(p => [p.user_id, p.user]) || []
                   )}
-                  
+                />
+              )}
+              
               <div ref={messagesEndRef} />
             </>
           )}
@@ -914,33 +902,68 @@ const MessageThreadPage = () => {
               >
               {/* Attachment preview area */}
               {attachments.length > 0 && (
-          <Box 
-            sx={{ 
+                <Box 
+                  sx={{ 
                     p: 1, 
                     mb: 1, 
                     borderRadius: 1,
                     backgroundColor: alpha(theme.palette.background.default, 0.5),
-              display: 'flex',
+                    display: 'flex',
                     flexWrap: 'wrap',
                     gap: 1
-            }}
-          >
-                  {attachments.map((file, index) => (
-                    <Chip
-                      key={index}
-                      label={file.name}
-                      onDelete={() => {
-                        const newAttachments = [...attachments];
-                        newAttachments.splice(index, 1);
-                        setAttachments(newAttachments);
-                      }}
-                      icon={<AttachFileIcon />}
-                size="small"
-                      sx={{ maxWidth: '100%' }}
-                    />
-                  ))}
-          </Box>
-        )}
+                  }}
+                >
+                  {attachments.map((file, index) => {
+                    // Fix comma-separated URLs if present
+                    let fileUrl = file.url;
+                    if (fileUrl && fileUrl.includes(',http')) {
+                      fileUrl = fileUrl.split(',')[0]; // Take just the first URL
+                    }
+                    
+                    return file.type?.startsWith('image/') ? (
+                      <Box key={index} sx={{ position: 'relative', width: 120, height: 80 }}>
+                        <SafeImage 
+                          src={fileUrl || URL.createObjectURL(file)} 
+                          alt={file.name} 
+                          sx={{ width: '100%', height: '100%', borderRadius: 1 }}
+                        />
+                        <IconButton
+                          size="small"
+                          sx={{
+                            position: 'absolute',
+                            top: 4,
+                            right: 4,
+                            backgroundColor: alpha(theme.palette.background.paper, 0.7),
+                            '&:hover': {
+                              backgroundColor: alpha(theme.palette.background.paper, 0.9),
+                            }
+                          }}
+                          onClick={() => {
+                            const newAttachments = [...attachments];
+                            newAttachments.splice(index, 1);
+                            setAttachments(newAttachments);
+                          }}
+                        >
+                          <CloseIcon fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    ) : (
+                      <Chip
+                        key={index}
+                        label={file.name}
+                        onDelete={() => {
+                          const newAttachments = [...attachments];
+                          newAttachments.splice(index, 1);
+                          setAttachments(newAttachments);
+                        }}
+                        icon={<AttachFileIcon />}
+                        size="small"
+                        sx={{ maxWidth: '100%' }}
+                      />
+                    );
+                  })}
+                </Box>
+              )}
         
               <Stack direction="row" spacing={1} alignItems="center">
                 <MessageAttachmentUploader
@@ -992,4 +1015,4 @@ const MessageThreadPage = () => {
   );
 };
 
-export default MessageThreadPage; 
+export default MessageThreadPage;

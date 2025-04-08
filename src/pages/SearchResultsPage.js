@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Container,
   Grid,
@@ -40,7 +40,7 @@ import ViewListIcon from '@mui/icons-material/ViewList';
 import ListingCard from '../components/ListingCard';
 import { getListings, getCategories } from '../services/supabase';
 
-const ITEMS_PER_PAGE = 12;
+const ITEMS_PER_SLIDER = 10;
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest First' },
   { value: 'oldest', label: 'Oldest First' },
@@ -63,14 +63,10 @@ const SearchResultsPage = () => {
   const isDarkMode = theme.palette.mode === 'dark';
   const queryParams = new URLSearchParams(location.search);
 
-  const [listings, setListings] = useState([]);
-  const [priorityListings, setPriorityListings] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [categorizedListings, setCategorizedListings] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [totalPages, setTotalPages] = useState(1);
-  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [gridView, setGridView] = useState(true);
   const [filters, setFilters] = useState({
     search: queryParams.get('q') || '',
     category: queryParams.get('category') || '',
@@ -79,7 +75,6 @@ const SearchResultsPage = () => {
     condition: queryParams.get('condition') || '',
     sortBy: queryParams.get('sortBy') || 'newest',
     showPromotedOnly: queryParams.get('promotedOnly') === 'true',
-    page: parseInt(queryParams.get('page')) || 1,
   });
   
   const [priceRange, setPriceRange] = useState([
@@ -87,94 +82,155 @@ const SearchResultsPage = () => {
     filters.maxPrice ? parseFloat(filters.maxPrice) : 1000
   ]);
 
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
   useEffect(() => {
-    const fetchCategories = async () => {
+    const fetchInitialData = async () => {
+      setLoading(true);
+      setError('');
       try {
-        const data = await getCategories();
-        setCategories(data);
+        const cats = await getCategories();
+        setCategories(cats || []);
+        const initialCategorizedState = {};
+        (cats || []).forEach(cat => {
+          initialCategorizedState[cat.id || cat.name] = { 
+            name: cat.name, 
+            listings: [], 
+            loading: true,
+            error: null 
+          };
+        });
+        setCategorizedListings(initialCategorizedState);
+        
       } catch (err) {
         console.error('Error fetching categories:', err);
-      }
-    };
-
-    fetchCategories();
-  }, []);
-
-  useEffect(() => {
-    const fetchListings = async () => {
-      setLoading(true);
-      try {
-        // Get priority listings first (those that are promoted and approved)
-        const priorityResult = await getListings({
-          search: filters.search,
-          category: filters.category,
-          condition: filters.condition,
-          minPrice: filters.minPrice ? parseFloat(filters.minPrice) : undefined,
-          maxPrice: filters.maxPrice ? parseFloat(filters.maxPrice) : undefined,
-          isPriority: true,
-          sortBy: filters.sortBy,
-          itemsPerPage: 100, // Get all priority listings
-          page: 1
-        });
-        
-        if (priorityResult.error) throw priorityResult.error;
-        
-        setPriorityListings(priorityResult.data || []);
-        
-        // Then get regular listings, excluding priority ones
-        const { data, count, error } = await getListings({
-          search: filters.search,
-          category: filters.category,
-          condition: filters.condition,
-          minPrice: filters.minPrice ? parseFloat(filters.minPrice) : undefined,
-          maxPrice: filters.maxPrice ? parseFloat(filters.maxPrice) : undefined,
-          excludeIds: priorityResult.data?.map(item => item.id) || [],
-          showPromotedOnly: filters.showPromotedOnly,
-          sortBy: filters.sortBy,
-          page: filters.page,
-          itemsPerPage: ITEMS_PER_PAGE
-        });
-
-        if (error) throw error;
-
-        setListings(data || []);
-        setTotalPages(Math.ceil((count || 0) / ITEMS_PER_PAGE));
-      } catch (err) {
-        setError('Error loading listings');
-        console.error('Error:', err);
-      } finally {
+        setError('Could not load categories.');
         setLoading(false);
       }
     };
 
-    fetchListings();
-  }, [filters]);
+    fetchInitialData();
+  }, []);
+
+  useEffect(() => {
+    if (Object.keys(categorizedListings).length === 0) {
+        if (loading && categories.length === 0) return; 
+        if (!loading && categories.length === 0 && error) return;
+        if (!loading && categories.length > 0 && Object.keys(categorizedListings).length === 0) return;
+    }
+    
+    const fetchListingsForCategories = async () => {
+        let anyCategoryStillLoading = false;
+        
+        for (const category of categories) {
+          const categoryId = category.id || category.name;
+          
+          if (!categorizedListings[categoryId]?.loading) continue; 
+
+          anyCategoryStillLoading = true;
+          try {
+            const { data, error: fetchError } = await getListings({
+          search: filters.search,
+              category: categoryId,
+          condition: filters.condition,
+          minPrice: filters.minPrice ? parseFloat(filters.minPrice) : undefined,
+          maxPrice: filters.maxPrice ? parseFloat(filters.maxPrice) : undefined,
+          sortBy: filters.sortBy,
+              showPromotedOnly: filters.showPromotedOnly,
+              itemsPerPage: ITEMS_PER_SLIDER,
+          page: 1
+        });
+        
+            if (fetchError) throw fetchError;
+
+            // Process data to map 'users' to 'seller'
+            const processedData = (data || []).map(listing => ({
+              ...listing,
+              seller: listing.users || { name: 'Unknown Seller', university: 'N/A' } // Provide a default if users is null
+            }));
+
+            setCategorizedListings(prev => ({
+              ...prev,
+              [categoryId]: { 
+                ...prev[categoryId], 
+                listings: processedData, // Use processed data
+                loading: false, 
+                error: null 
+              }
+            }));
+
+      } catch (err) {
+            console.error(`Error fetching listings for category ${categoryId}:`, err);
+            setCategorizedListings(prev => ({
+              ...prev,
+              [categoryId]: { 
+                ...prev[categoryId], 
+                listings: [], 
+                loading: false, 
+                error: 'Could not load listings' 
+              }
+            }));
+          }
+        }
+        if (!anyCategoryStillLoading) {
+        setLoading(false);
+      }
+    };
+
+    fetchListingsForCategories();
+    
+  }, [categories, filters.search, filters.sortBy, filters.condition, filters.minPrice, filters.maxPrice, filters.showPromotedOnly]);
+
+  useEffect(() => {
+    setCategorizedListings(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(catId => {
+            newState[catId] = { ...newState[catId], loading: true, error: null };
+        });
+        return newState;
+    });
+    setLoading(true);
+  }, [filters.search]);
 
   const handleFilterChange = (event) => {
     const { name, value } = event.target;
+    setCategorizedListings(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(catId => {
+            newState[catId] = { ...newState[catId], loading: true, error: null };
+        });
+        return newState;
+    });
+    setLoading(true); 
+
     setFilters((prev) => ({
       ...prev,
       [name]: value,
-      page: 1, // Reset to first page when filters change
     }));
 
-    // Update URL
     const newParams = new URLSearchParams(location.search);
     if (value) {
       newParams.set(name, value);
     } else {
       newParams.delete(name);
     }
-    newParams.set('page', '1');
     navigate(`${location.pathname}?${newParams.toString()}`);
   };
   
   const handlePromotedOnlyChange = (event) => {
     const checked = event.target.checked;
+    setCategorizedListings(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(catId => {
+            newState[catId] = { ...newState[catId], loading: true, error: null };
+        });
+        return newState;
+    });
+    setLoading(true); 
+
     setFilters((prev) => ({
       ...prev,
       showPromotedOnly: checked,
-      page: 1,
     }));
     
     const newParams = new URLSearchParams(location.search);
@@ -183,7 +239,6 @@ const SearchResultsPage = () => {
     } else {
       newParams.delete('promotedOnly');
     }
-    newParams.set('page', '1');
     navigate(`${location.pathname}?${newParams.toString()}`);
   };
   
@@ -192,261 +247,296 @@ const SearchResultsPage = () => {
   };
   
   const handlePriceRangeCommitted = () => {
+    setCategorizedListings(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(catId => {
+            newState[catId] = { ...newState[catId], loading: true, error: null };
+        });
+        return newState;
+    });
+    setLoading(true); 
+
     setFilters((prev) => ({
       ...prev,
       minPrice: priceRange[0].toString(),
       maxPrice: priceRange[1].toString(),
-      page: 1,
     }));
     
     const newParams = new URLSearchParams(location.search);
     newParams.set('minPrice', priceRange[0].toString());
     newParams.set('maxPrice', priceRange[1].toString());
-    newParams.set('page', '1');
     navigate(`${location.pathname}?${newParams.toString()}`);
-  };
-
-  const handlePageChange = (event, newPage) => {
-    setFilters((prev) => ({
-      ...prev,
-      page: newPage,
-    }));
-
-    const newParams = new URLSearchParams(location.search);
-    newParams.set('page', newPage.toString());
-    navigate(`${location.pathname}?${newParams.toString()}`);
-  };
-  
-  const applyFilters = (event) => {
-    event.preventDefault();
-    // Already handled by individual filter changes
   };
   
   const clearFilters = () => {
-    // Reset filters but keep search term
-    const searchTerm = filters.search;
+    setCategorizedListings(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(catId => {
+            newState[catId] = { ...newState[catId], loading: true, error: null };
+        });
+        return newState;
+    });
+    setLoading(true);
+
     setFilters({
-      search: searchTerm,
+      search: '',
       category: '',
       minPrice: '',
       maxPrice: '',
       condition: '',
       sortBy: 'newest',
       showPromotedOnly: false,
-      page: 1,
     });
     setPriceRange([0, 1000]);
     
-    // Update URL
     const newParams = new URLSearchParams();
-    if (searchTerm) newParams.set('q', searchTerm);
     navigate(`${location.pathname}?${newParams.toString()}`);
   };
 
-  // Combine priority listings with regular listings for display
-  const displayListings = [...priorityListings, ...listings];
+  const renderSliders = () => {
+    if (loading && categories.length === 0 && Object.keys(categorizedListings).length === 0) {
+      return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+    
+    if (error && categories.length === 0) {
+        return <Alert severity="error" sx={{ mt: 4 }}>{error}</Alert>;
+    }
+
+    const categoriesWithListings = categories.filter(category => {
+        const categoryId = category.id || category.name;
+        const data = categorizedListings[categoryId];
+        return data && !data.loading && !data.error && data.listings.length > 0;
+    });
+      
+    const allCategoriesLoaded = Object.values(categorizedListings).every(data => !data.loading);
+    if (allCategoriesLoaded && categoriesWithListings.length === 0) {
+  return (
+      <Box
+        sx={{
+                textAlign: 'center',
+                py: 8,
+                px: 2,
+          borderRadius: 3,
+                border: `1px dashed ${theme.palette.divider}`,
+                bgcolor: isDarkMode
+                  ? alpha(theme.palette.background.paper, 0.4)
+                  : alpha(theme.palette.background.paper, 0.6),
+                mt: 4
+              }}
+            >
+              <Typography variant="h6" color="text.secondary" align="center" sx={{ mb: 1 }}>
+                No listings found
+              </Typography>
+              <Typography variant="body2" color="text.secondary" align="center">
+                Try adjusting your search filters or clearing them to browse all categories.
+              </Typography>
+            </Box>
+        );
+    }
+
+    return categoriesWithListings.map(category => {
+      const categoryId = category.id || category.name;
+      const categoryData = categorizedListings[categoryId];
+
+      return (
+        <Box key={categoryId} sx={{ mb: 6 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
+            <Typography variant="h5" component="h2" fontWeight="bold">
+              {categoryData.name}
+            </Typography>
+            <Button 
+                variant="outlined"
+                size="small" 
+                onClick={() => {
+                    const params = new URLSearchParams();
+                    params.set('category', categoryId);
+                    if (filters.search) params.set('q', filters.search);
+                    navigate(`/search?${params.toString()}`);
+                }}
+                endIcon={<FilterListIcon />}
+                sx={{ borderRadius: '20px' }}
+            >
+                See All
+            </Button>
+          </Box>
+          <Box
+            sx={{
+              display: 'flex',
+              overflowX: 'auto',
+              gap: { xs: 1.5, sm: 2.5 },
+              py: 1.5,
+              px: 0.5,
+              '&::-webkit-scrollbar': { height: '8px' },
+              '&::-webkit-scrollbar-thumb': { backgroundColor: alpha(theme.palette.text.primary, 0.2), borderRadius: '4px' },
+              '&::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+            }}
+          >
+            {categoryData.listings.map(listing => (
+              <Box key={listing.id} sx={{ 
+                  flex: '0 0 auto', 
+                  width: { xs: '220px', sm: '260px', md: '280px' },
+                }}
+              >
+                    <ListingCard listing={listing} />
+              </Box>
+            ))}
+            <Box sx={{ flex: '0 0 1px' }} />
+          </Box>
+        </Box>
+      );
+    });
+  };
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
-      <Box
-        sx={{
-          width: '100%',
-          borderRadius: 3,
-          mb: 4,
-          p: { xs: 2, md: 4 },
-          background: isDarkMode
-            ? `linear-gradient(120deg, ${alpha(theme.palette.primary.dark, 0.2)}, ${alpha(theme.palette.background.default, 0.1)})`
-            : `linear-gradient(120deg, ${alpha(theme.palette.primary.light, 0.1)}, ${alpha(theme.palette.background.default, 0.05)})`,
-          backdropFilter: 'blur(8px)',
-          boxShadow: theme.shadows[2],
-          position: 'relative',
-          overflow: 'hidden',
+      <Typography 
+        variant="h4" 
+        component="h1" 
+        gutterBottom 
+        sx={{ 
+            fontWeight: 'bold', 
+            mb: 3,
+            color: isDarkMode ? theme.palette.grey[100] : theme.palette.grey[900]
         }}
       >
-        <Box
-          sx={{
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            width: '300px',
-            height: '300px',
-            background: `radial-gradient(circle, ${alpha(theme.palette.primary.main, 0.15)}, transparent 70%)`,
-            transform: 'translate(30%, -30%)',
-            zIndex: 0,
-          }}
-        />
+        {filters.search 
+          ? `Search Results for "${filters.search}"` 
+          : filters.category 
+          ? `Listings in ${categories.find(c => (c.id || c.name) === filters.category)?.name || filters.category}`
+          : 'Find Your Perfect Items' 
+        }
+      </Typography>
 
-        <Box sx={{ position: 'relative', zIndex: 1 }}>
-          <Typography
-            variant="h4"
-            component="h1"
-            sx={{
-              mb: 2,
-              fontWeight: 700,
-              background: isDarkMode
-                ? 'linear-gradient(90deg, #fff, #e0e0e0)'
-                : 'linear-gradient(90deg, #1a237e, #283593)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {filters.search ? `Results for "${filters.search}"` : 'Find Your Perfect Items'}
-          </Typography>
-
-          <Box
-            component="form"
-            sx={{
-              display: 'flex',
-              flexDirection: { xs: 'column', sm: 'row' },
-              gap: 2,
-              width: '100%',
-              maxWidth: '800px',
-            }}
-            onSubmit={(e) => {
-              e.preventDefault();
-              const newParams = new URLSearchParams();
-              if (filters.search) newParams.set('q', filters.search);
-              navigate(`${location.pathname}?${newParams.toString()}`);
-            }}
-          >
+      <Paper 
+        elevation={3}
+        sx={{ 
+            p: { xs: 2, md: 3 }, 
+            mb: 4, 
+            borderRadius: 4,
+            background: isDarkMode 
+              ? `linear-gradient(145deg, ${alpha(theme.palette.grey[900], 0.9)}, ${alpha(theme.palette.primary.dark, 0.2)})`
+              : `linear-gradient(145deg, ${theme.palette.grey[100]}, ${theme.palette.grey[50]})`,
+            boxShadow: isDarkMode ? '0 8px 32px rgba(0,0,0,0.3)' : '0 8px 24px rgba(0,0,0,0.1)',
+        }}
+      >
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} sm={8} md={9}>
             <TextField
               fullWidth
               name="search"
-              label="What are you looking for?"
+              placeholder="What are you looking for?"
+              variant="outlined"
               value={filters.search}
               onChange={handleFilterChange}
-              variant="outlined"
-              sx={{
-                flexGrow: 1,
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: 2,
-                  backgroundColor: isDarkMode 
-                    ? alpha(theme.palette.background.paper, 0.8)
-                    : alpha(theme.palette.background.paper, 0.9),
-                  backdropFilter: 'blur(8px)',
-                  transition: 'all 0.3s',
-                  '&:hover': {
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.background.paper, 0.9)
-                      : '#fff',
-                  },
-                  '&.Mui-focused': {
-                    backgroundColor: isDarkMode 
-                      ? alpha(theme.palette.background.paper, 1)
-                      : '#fff',
-                  },
-                },
-              }}
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton type="submit" edge="end">
-                      <SearchIcon />
-                    </IconButton>
+                      <SearchIcon sx={{ color: isDarkMode? 'grey.500' : 'grey.600' }}/>
                   </InputAdornment>
                 ),
+                sx: { 
+                    borderRadius: 3,
+                    backgroundColor: isDarkMode ? alpha(theme.palette.grey[800], 0.5) : alpha(theme.palette.common.white, 0.8),
+                    '& fieldset': { borderColor: alpha(theme.palette.grey[500], 0.3) },
+                    '&:hover fieldset': { borderColor: alpha(theme.palette.grey[500], 0.5) },
+                }
+              }}
+              onKeyPress={(ev) => {
+                if (ev.key === 'Enter') {
+                  ev.preventDefault(); 
+                }
               }}
             />
-
+          </Grid>
+          
+          <Grid item xs={12} sm={4} md={3}>
             <Button
-              variant="contained"
-              color="primary"
-              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-              startIcon={<TuneIcon />}
-              sx={{
-                minWidth: 120,
-                borderRadius: 2,
-                boxShadow: theme.shadows[3],
-                whiteSpace: 'nowrap',
-              }}
+                fullWidth 
+                variant="contained"
+                color="primary"
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                startIcon={<TuneIcon />}
+                endIcon={showAdvancedFilters ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                sx={{ 
+                    height: '56px',
+                    borderRadius: 3,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    fontSize: '1rem',
+                    textTransform: 'none'
+                 }}
             >
               Filters
             </Button>
-          </Box>
-
-          <Collapse in={showAdvancedFilters}>
-            <Card sx={{ mt: 3, p: 2, borderRadius: 2, boxShadow: theme.shadows[3] }}>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <FormControl fullWidth variant="outlined">
-                    <InputLabel>Category</InputLabel>
-                    <Select
-                      name="category"
-                      value={filters.category}
-                      onChange={handleFilterChange}
-                      label="Category"
-                    >
-                      <MenuItem value="">All Categories</MenuItem>
-                      {categories.map((category) => (
-                        <MenuItem key={category.id} value={category.id}>
-                          {category.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <FormControl fullWidth variant="outlined">
-                    <InputLabel>Condition</InputLabel>
-                    <Select
-                      name="condition"
-                      value={filters.condition}
-                      onChange={handleFilterChange}
-                      label="Condition"
-                    >
-                      <MenuItem value="">Any Condition</MenuItem>
-                      {CONDITION_OPTIONS.map((option) => (
-                        <MenuItem key={option.value} value={option.value}>
-                          {option.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <FormControl fullWidth variant="outlined">
-                    <InputLabel>Sort By</InputLabel>
-                    <Select
-                      name="sortBy"
-                      value={filters.sortBy}
-                      onChange={handleFilterChange}
-                      label="Sort By"
-                    >
-                      {SORT_OPTIONS.map((option) => (
-                        <MenuItem key={option.value} value={option.value}>
-                          {option.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                <Grid item xs={12} sm={6} md={3}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={filters.showPromotedOnly}
-                        onChange={handlePromotedOnlyChange}
-                        name="showPromotedOnly"
-                        color="primary"
-                      />
-                    }
-                    label={
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Typography variant="body2">Featured Only</Typography>
-                        <StarIcon sx={{ ml: 0.5, color: 'warning.main', fontSize: 18 }} />
-                      </Box>
-                    }
-                  />
-                </Grid>
-
-                <Grid item xs={12}>
-                  <Typography gutterBottom>
-                    Price Range: GHC {priceRange[0]} - GHC {priceRange[1]}
-                  </Typography>
+          </Grid>
+        </Grid>
+        
+        <Collapse in={showAdvancedFilters} timeout="auto" unmountOnExit>
+          <Divider sx={{ my: 3, borderColor: alpha(theme.palette.divider, 0.2) }} />
+          <Grid container spacing={3} alignItems="center">
+            <Grid item xs={12} sm={6} md={3}>
+              <FormControl fullWidth variant="outlined">
+                <InputLabel>Category</InputLabel>
+                <Select
+                  name="category"
+                  value={filters.category}
+                  onChange={handleFilterChange}
+                  label="Category"
+                >
+                <MenuItem value=""><em>All Categories</em></MenuItem>
+                {categories.map(cat => (
+                  <MenuItem key={cat.id || cat.name} value={cat.id || cat.name}>{cat.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <FormControl fullWidth variant="outlined">
+                <InputLabel>Condition</InputLabel>
+                <Select
+                  name="condition"
+                  value={filters.condition}
+                  onChange={handleFilterChange}
+                  label="Condition"
+                >
+                <MenuItem value=""><em>Any Condition</em></MenuItem>
+                {CONDITION_OPTIONS.map(option => (
+                  <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth variant="outlined" >
+                  <InputLabel>Sort By</InputLabel>
+                  <Select
+                    name="sortBy"
+                    value={filters.sortBy}
+                    onChange={handleFilterChange}
+                    label="Sort By"
+                  >
+                    {SORT_OPTIONS.map(option => (
+                      <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Typography gutterBottom>Price Range (Ghc)</Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <TextField
+                  label="Min"
+                  type="number"
+                  size="small"
+                  value={priceRange[0]}
+                  onChange={(e) => setPriceRange([Number(e.target.value) < 0 ? 0 : Number(e.target.value), priceRange[1]])}
+                  onBlur={handlePriceRangeCommitted}
+                  sx={{ width: '100px' }}
+                  inputProps={{ min: 0 }}
+                />
                   <Slider
                     value={priceRange}
                     onChange={handlePriceRangeChange}
@@ -455,166 +545,50 @@ const SearchResultsPage = () => {
                     min={0}
                     max={1000}
                     step={10}
-                  />
-                </Grid>
-
-                <Grid item xs={12}>
-                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
-                    <Button onClick={clearFilters} variant="outlined">
-                      Clear All
-                    </Button>
-                  </Box>
-                </Grid>
-              </Grid>
-            </Card>
-          </Collapse>
-        </Box>
-      </Box>
-
-      {/* Results Section */}
-      <Box sx={{ mb: 3 }}>
-        <Box sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          mb: 2,
-          flexWrap: 'wrap',
-          gap: 1
-        }}>
-          <Typography variant="body2" color="text.secondary">
-            {loading ? 'Finding items...' : `${listings.length} results found${filters.search ? ` for "${filters.search}"` : ''}`}
-          </Typography>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Button
+                  sx={{ mx: 1 }}
+                  disableSwap
+                />
+                 <TextField
+                  label="Max"
+                  type="number"
               size="small"
-              variant={gridView ? 'contained' : 'outlined'}
-              color="primary"
-              onClick={() => setGridView(true)}
-              sx={{ minWidth: 'auto', p: 1 }}
-            >
-              <GridViewIcon fontSize="small" />
-            </Button>
-            <Button
-              size="small"
-              variant={!gridView ? 'contained' : 'outlined'}
-              color="primary"
-              onClick={() => setGridView(false)}
-              sx={{ minWidth: 'auto', p: 1 }}
-            >
-              <ViewListIcon fontSize="small" />
-            </Button>
-            
-            <Chip 
-              label={`Page ${filters.page} of ${totalPages}`} 
-              size="small" 
-              variant="outlined" 
+                  value={priceRange[1]}
+                  onChange={(e) => setPriceRange([priceRange[0], Number(e.target.value) < 0 ? 0 : Number(e.target.value)])}
+                  onBlur={handlePriceRangeCommitted}
+                  sx={{ width: '100px' }}
+                  inputProps={{ min: 0 }}
             />
           </Box>
-        </Box>
-
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
-      </Box>
-
-      {/* Priority Listings */}
-      {priorityListings.length > 0 && (
-        <Fade in={!loading} timeout={600}>
-          <Box sx={{ mb: 4 }}>
-            <Box 
-              sx={{ 
-                mb: 2, 
-                display: 'flex', 
-                alignItems: 'center',
-                p: 1,
-                pl: 2,
-                borderRadius: 2,
-                background: isDarkMode
-                  ? alpha(theme.palette.warning.dark, 0.15)
-                  : alpha(theme.palette.warning.light, 0.15),
-              }}
-            >
-              <StarIcon sx={{ mr: 1, color: 'warning.main' }} />
-              <Typography variant="subtitle1" fontWeight={600}>
-                Featured Listings
-              </Typography>
-            </Box>
-            
-            <Grid container spacing={3}>
-              {priorityListings.map((listing) => (
-                <Grid item key={listing.id} xs={12} sm={gridView ? 6 : 12} md={gridView ? 4 : 12} lg={gridView ? 3 : 12}>
-                  <ListingCard listing={listing} />
-                </Grid>
-              ))}
             </Grid>
-            
-            <Divider sx={{ my: 4 }} />
-          </Box>
-        </Fade>
-      )}
+            <Grid item xs={12} sm={6} md={3}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={filters.showPromotedOnly}
+                      onChange={handlePromotedOnlyChange}
+                      name="showPromotedOnly"
+                    />
+                  }
+                  label="Show Promoted Listings Only"
+                />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+                <Button 
+                    fullWidth 
+                    variant="outlined"
+                    onClick={clearFilters}
+                    sx={{ height: '40px' }}
+                >
+                    Clear All Filters
+                </Button>
+            </Grid>
+          </Grid>
+        </Collapse>
+      </Paper>
 
-      {/* Regular Listings */}
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <>
-          {displayListings.length === 0 ? (
-            <Box
-              sx={{
-                textAlign: 'center',
-                py: 8,
-                px: 2,
-                borderRadius: 3,
-                border: `1px dashed ${theme.palette.divider}`,
-                bgcolor: isDarkMode
-                  ? alpha(theme.palette.background.paper, 0.4)
-                  : alpha(theme.palette.background.paper, 0.6),
-              }}
-            >
-              <Typography variant="h6" color="text.secondary" align="center" sx={{ mb: 1 }}>
-                No listings found
-              </Typography>
-              <Typography variant="body2" color="text.secondary" align="center">
-                Try adjusting your search filters or browse all listings
-              </Typography>
+      <Box sx={{ mt: 4 }}>
+         {renderSliders()}
             </Box>
-          ) : (
-            <Fade in={!loading} timeout={600}>
-              <Grid container spacing={3}>
-                {listings.map((listing) => (
-                  <Grid item key={listing.id} xs={12} sm={gridView ? 6 : 12} md={gridView ? 4 : 12} lg={gridView ? 3 : 12}>
-                    <ListingCard listing={listing} />
-                  </Grid>
-                ))}
-              </Grid>
-            </Fade>
-          )}
-
-          {totalPages > 1 && (
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 6, mb: 2 }}>
-              <Pagination
-                count={totalPages}
-                page={filters.page}
-                onChange={handlePageChange}
-                color="primary"
-                size="large"
-                showFirstButton
-                showLastButton
-                sx={{
-                  '& .MuiPaginationItem-root': {
-                    borderRadius: 2,
-                  },
-                }}
-              />
-            </Box>
-          )}
-        </>
-      )}
     </Container>
   );
 };

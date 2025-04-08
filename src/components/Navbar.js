@@ -706,64 +706,123 @@ const Navbar = () => {
               }}
             >
               <List sx={{ py: 1 }}>
-                {[
-                  { path: '/', icon: <HomeIcon />, label: 'Home', index: 0 },
-                  { path: '/profile', icon: <AccountIcon />, label: 'Your Profile', index: 1 },
-                  { path: '/listings', icon: <ShoppingBagIcon />, label: 'Your Listings', index: 2 },
-                  { path: '/my-reports', icon: <ReportIcon />, label: 'Your Reports', index: 3 },
-                  { path: '/saved-listings', icon: <FavoriteIcon />, label: 'Saved Listings', index: 4 },
-                  { path: '/offers', icon: <OfferIcon />, label: 'Offers', index: 5 },
-                  { path: '/messages', icon: <ChatIcon />, label: 'Messages', index: 6 },
-                  { divider: true, index: 7 },
-                  { 
-                    path: '/create-listing', 
-                    icon: <AddCircleIcon color="secondary" />, 
-                    label: 'Post a Listing', 
-                    special: 'secondary',
-                    index: 8
-                  },
-                  { divider: true, index: 9 },
-                  { 
-                    action: handleSignOut, 
-                    icon: <LogoutIcon />, 
-                    label: 'Sign Out', 
-                    special: 'error',
-                    index: 10
-                  },
-                ].map((item, i) => 
-                  item.divider ? (
-                    <Divider 
-                      key={`divider-${i}`}
-                      sx={{ 
-                        my: 1.5,
-                        borderColor: isDarkMode 
-                          ? alpha(theme.palette.common.white, 0.1)
-                          : alpha(theme.palette.common.black, 0.1),
-                        animation: `fadeIn 0.5s ease forwards ${0.1 + (item.index * 0.05)}s`,
-                        opacity: 0.5,
-                        '@keyframes fadeIn': {
-                          to: { opacity: 1 }
-                        }
-                      }} 
-                    />
-                  ) : (
+                {user ? (
+                  [
+                    { path: '/', icon: <HomeIcon />, label: 'Home', index: 0 },
+                    { path: '/profile', icon: <AccountIcon />, label: 'Your Profile', index: 1 },
+                    { path: '/listings', icon: <ShoppingBagIcon />, label: 'Your Listings', index: 2 },
+                    { path: '/my-reports', icon: <ReportIcon />, label: 'Your Reports', index: 3 },
+                    { path: '/saved-listings', icon: <FavoriteIcon />, label: 'Saved Listings', index: 4 },
+                    { path: '/offers', icon: <OfferIcon />, label: 'Offers', index: 5 },
+                    { path: '/messages', icon: <ChatIcon />, label: 'Messages', index: 6 },
+                    { divider: true, index: 7 },
+                    { 
+                      path: '/create-listing', 
+                      icon: <AddCircleIcon color="secondary" />, 
+                      label: 'Post a Listing', 
+                      special: 'secondary',
+                      index: 8
+                    },
+                    { divider: true, index: 9 },
+                    { 
+                      action: handleSignOut, 
+                      icon: <LogoutIcon />, 
+                      label: 'Sign Out', 
+                      special: 'error',
+                      index: 10
+                    },
+                  ].map((item, i) => 
+                    item.divider ? (
+                      <Divider 
+                        key={`divider-${i}`}
+                        sx={{ 
+                          my: 1.5,
+                          borderColor: isDarkMode 
+                            ? alpha(theme.palette.common.white, 0.1)
+                            : alpha(theme.palette.common.black, 0.1),
+                          animation: `fadeIn 0.5s ease forwards ${0.1 + (item.index * 0.05)}s`,
+                          opacity: 0.5,
+                          '@keyframes fadeIn': {
+                            to: { opacity: 1 }
+                          }
+                        }} 
+                      />
+                    ) : (
+                      <ListItem 
+                        key={item.path || `action-${i}`}
+                        component={item.path ? Link : 'li'}
+                        to={item.path}
+                        onClick={() => {
+                          if (item.action) item.action();
+                          toggleMobileMenu();
+                        }}
+                        sx={{
+                          py: 1.8,
+                          color: item.special === 'error' 
+                            ? (isDarkMode ? '#ef9a9a' : '#f44336') 
+                            : item.special === 'secondary' 
+                              ? (isDarkMode ? '#f48fb1' : '#e91e63') 
+                              : isActive(item.path) 
+                                ? (isDarkMode ? '#90caf9' : '#1976d2')
+                                : (isDarkMode ? 'white' : '#424242'),
+                          borderLeft: '4px solid transparent',
+                          backgroundColor: isActive(item.path) 
+                            ? (isDarkMode 
+                                ? alpha('#1e88e5', 0.15) 
+                                : alpha('#bbdefb', 0.7))
+                            : 'transparent',
+                          transition: 'all 0.3s ease',
+                          animation: `slideInRight 0.5s ease forwards ${0.1 + (item.index * 0.05)}s`,
+                          transform: 'translateX(0)',
+                          opacity: 0.95,
+                          '@keyframes slideInRight': {
+                            to: { 
+                              transform: 'translateX(0)',
+                              opacity: 1
+                            }
+                          },
+                          '&:hover': {
+                            backgroundColor: isDarkMode 
+                              ? alpha('#1e88e5', 0.2) 
+                              : alpha('#bbdefb', 0.5),
+                          }
+                        }}
+                      >
+                        <ListItemIcon sx={{ 
+                          color: item.special === 'error' 
+                            ? (isDarkMode ? '#ef9a9a' : '#f44336') 
+                            : item.special === 'secondary' 
+                              ? (isDarkMode ? '#f48fb1' : '#e91e63') 
+                              : isActive(item.path) 
+                                ? (isDarkMode ? '#90caf9' : '#1976d2')
+                                : (isDarkMode ? 'white' : '#424242'),
+                          minWidth: '40px'
+                        }}>
+                          {item.icon}
+                        </ListItemIcon>
+                        <ListItemText 
+                          primary={item.label} 
+                          primaryTypographyProps={{ 
+                            fontWeight: isActive(item.path) ? 500 : 400,
+                            fontSize: '0.95rem'
+                          }}
+                        />
+                      </ListItem>
+                    )
+                  )
+                ) : (
+                  [
+                    { path: '/login', icon: <AccountIcon />, label: 'Login', index: 0 },
+                    { path: '/register', icon: <AccountIcon />, label: 'Sign Up', index: 1 },
+                  ].map((item, i) => (
                     <ListItem 
-                      key={item.path || `action-${i}`}
-                      component={item.path ? Link : 'li'}
+                      key={item.path}
+                      component={Link}
                       to={item.path}
-                      onClick={() => {
-                        if (item.action) item.action();
-                        toggleMobileMenu();
-                      }}
+                      onClick={toggleMobileMenu}
                       sx={{
                         py: 1.8,
-                        color: item.special === 'error' 
-                          ? (isDarkMode ? '#ef9a9a' : '#f44336') 
-                          : item.special === 'secondary' 
-                            ? (isDarkMode ? '#f48fb1' : '#e91e63') 
-                            : isActive(item.path) 
-                              ? (isDarkMode ? '#90caf9' : '#1976d2')
-                              : (isDarkMode ? 'white' : '#424242'),
+                        color: isDarkMode ? 'white' : '#424242',
                         borderLeft: '4px solid transparent',
                         backgroundColor: isActive(item.path) 
                           ? (isDarkMode 
@@ -788,13 +847,7 @@ const Navbar = () => {
                       }}
                     >
                       <ListItemIcon sx={{ 
-                        color: item.special === 'error' 
-                          ? (isDarkMode ? '#ef9a9a' : '#f44336') 
-                          : item.special === 'secondary' 
-                            ? (isDarkMode ? '#f48fb1' : '#e91e63') 
-                            : isActive(item.path) 
-                              ? (isDarkMode ? '#90caf9' : '#1976d2')
-                              : (isDarkMode ? 'white' : '#424242'),
+                        color: isDarkMode ? 'white' : '#424242',
                         minWidth: '40px'
                       }}>
                         {item.icon}
@@ -802,12 +855,12 @@ const Navbar = () => {
                       <ListItemText 
                         primary={item.label} 
                         primaryTypographyProps={{ 
-                          fontWeight: isActive(item.path) ? 500 : 400,
+                          fontWeight: 400,
                           fontSize: '0.95rem'
                         }}
                       />
                     </ListItem>
-                  )
+                  ))
                 )}
               </List>
             </Paper>

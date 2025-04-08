@@ -74,6 +74,8 @@ import UserReviews from '../components/UserReviews';
 import OfferDialog from '../components/OfferDialog';
 import RecentlyViewedListings from '../components/RecentlyViewedListings';
 import UserContactCard from '../components/UserContactCard';
+import ProductReviewList from '../components/ProductReviewList';
+import ProductReviewForm from '../components/ProductReviewForm';
 import { useSnackbar } from 'notistack';
 
 // Modern Image Carousel component with enhanced UI
@@ -339,6 +341,7 @@ const ListingDetailPage = () => {
   const [sellerReviews, setSellerReviews] = useState([]);
   const [showReviews, setShowReviews] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const imageContainerRef = useRef(null);
 
@@ -1368,64 +1371,158 @@ const ListingDetailPage = () => {
           )}
         </Grid>
         
-        {/* User Reviews Section */}
+        {/* Reviews Section - Side by side on desktop, stacked on mobile */}
         <Grid item xs={12}>
-          <Card elevation={0} sx={{ 
-            mt: { xs: 2, md: 4 }, 
-            boxShadow: '0 10px 40px rgba(0,0,0,0.05)',
-            borderRadius: 3,
-            p: 3,
-            background: isDarkMode
-              ? `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)}, ${alpha(theme.palette.background.paper, 0.7)})`
-              : 'linear-gradient(145deg, #ffffff, #f8f9fa)',
-            position: 'relative',
-            overflow: 'hidden',
-            backdropFilter: 'blur(10px)',
-            '&::before': {
-              content: '""',
-              position: 'absolute',
-              inset: 0,
-              borderRadius: 'inherit',
-              padding: '1px',
-              background: isDarkMode
-                ? 'linear-gradient(to bottom right, rgba(255,255,255,0.1), rgba(255,255,255,0))'
-                : 'linear-gradient(to bottom right, rgba(255,255,255,0.8), rgba(255,255,255,0.2))',
-              WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-              WebkitMaskComposite: 'xor',
-              maskComposite: 'exclude',
-              pointerEvents: 'none',
-            },
-          }}>
-            <Typography 
-              variant="h5" 
-              component="h2" 
-              fontWeight="bold" 
-              gutterBottom 
-              sx={{
-                position: 'relative',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1,
-                pb: 1,
-                '&::after': {
-                  content: '""',
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  width: '60px',
-                  height: 3,
-                  backgroundColor: 'primary.main',
-                  borderRadius: 1.5,
-                }
-              }}
-            >
-              <StarIcon color="warning" />
-              Seller Reviews
-            </Typography>
-            {listing.users && (
-              <UserReviews userId={listing.users.id} userName={listing.users.name} />
-            )}
-          </Card>
+          <Box sx={{ mt: { xs: 2, md: 4 } }}>
+            <Grid container spacing={3}>
+              {/* Seller Reviews Section */}
+              <Grid item xs={12} md={6}>
+                <Card elevation={0} sx={{ 
+                  height: '100%',
+                  boxShadow: '0 10px 40px rgba(0,0,0,0.05)',
+                  borderRadius: 3,
+                  p: 3,
+                  background: isDarkMode
+                    ? `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)}, ${alpha(theme.palette.background.paper, 0.7)})`
+                    : 'linear-gradient(145deg, #ffffff, #f8f9fa)',
+                  position: 'relative',
+                  overflow: 'hidden',
+                  backdropFilter: 'blur(10px)',
+                  '&::before': {
+                    content: '""',
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: 'inherit',
+                    padding: '1px',
+                    background: isDarkMode
+                      ? 'linear-gradient(to bottom right, rgba(255,255,255,0.1), rgba(255,255,255,0))'
+                      : 'linear-gradient(to bottom right, rgba(255,255,255,0.8), rgba(255,255,255,0.2))',
+                    WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                    WebkitMaskComposite: 'xor',
+                    maskComposite: 'exclude',
+                    pointerEvents: 'none',
+                  },
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}>
+                  <Typography 
+                    variant="h5" 
+                    component="h2" 
+                    fontWeight="bold" 
+                    gutterBottom 
+                    sx={{
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      pb: 1,
+                      '&::after': {
+                        content: '""',
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        width: '60px',
+                        height: 3,
+                        backgroundColor: 'primary.main',
+                        borderRadius: 1.5,
+                      }
+                    }}
+                  >
+                    <StarIcon color="warning" />
+                    Seller Reviews
+                  </Typography>
+                  {listing.users && (
+                    <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
+                      <UserReviews userId={listing.users.id} userName={listing.users.name} />
+                    </Box>
+                  )}
+                </Card>
+              </Grid>
+
+              {/* Product Reviews Section */}
+              <Grid item xs={12} md={6}>
+                <Card elevation={0} sx={{ 
+                  height: '100%',
+                  boxShadow: '0 10px 40px rgba(0,0,0,0.05)',
+                  borderRadius: 3,
+                  p: 3,
+                  background: isDarkMode
+                    ? `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)}, ${alpha(theme.palette.background.paper, 0.7)})`
+                    : 'linear-gradient(145deg, #ffffff, #f8f9fa)',
+                  position: 'relative',
+                  overflow: 'hidden',
+                  backdropFilter: 'blur(10px)',
+                  '&::before': {
+                    content: '""',
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: 'inherit',
+                    padding: '1px',
+                    background: isDarkMode
+                      ? 'linear-gradient(to bottom right, rgba(255,255,255,0.1), rgba(255,255,255,0))'
+                      : 'linear-gradient(to bottom right, rgba(255,255,255,0.8), rgba(255,255,255,0.2))',
+                    WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                    WebkitMaskComposite: 'xor',
+                    maskComposite: 'exclude',
+                    pointerEvents: 'none',
+                  },
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}>
+                  <Typography 
+                    variant="h5" 
+                    component="h2" 
+                    fontWeight="bold" 
+                    gutterBottom 
+                    sx={{
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1,
+                      pb: 1,
+                      '&::after': {
+                        content: '""',
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        width: '60px',
+                        height: 3,
+                        backgroundColor: 'primary.main',
+                        borderRadius: 1.5,
+                      }
+                    }}
+                  >
+                    <StarIcon color="primary" />
+                    Product Reviews
+                  </Typography>
+                  
+                  {/* Product Review List */}
+                  <Box sx={{ mb: 4, flexGrow: 1, overflow: 'auto' }}>
+                    <ProductReviewList 
+                      listingId={id} 
+                      refreshTrigger={refreshKey} 
+                    />
+                  </Box>
+                  
+                  {/* Product Review Form */}
+                  {user && !isOwner && (
+                    <Box id="product-review-form">
+                      <Divider sx={{ my: 3 }} />
+                      <Typography variant="h6" gutterBottom>
+                        Write a Product Review
+                      </Typography>
+                      <ProductReviewForm 
+                        sellerId={listing?.user_id}
+                        listingId={id}
+                        listingTitle={listing?.title}
+                        onSuccess={() => setRefreshKey(prev => prev + 1)}
+                      />
+                    </Box>
+                  )}
+                </Card>
+              </Grid>
+            </Grid>
+          </Box>
         </Grid>
         
         {/* Recently Viewed Section */}
@@ -1638,4 +1735,4 @@ const ListingDetailPage = () => {
   );
 };
 
-export default ListingDetailPage; 
+export default ListingDetailPage;

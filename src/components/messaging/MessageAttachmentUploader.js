@@ -2,233 +2,262 @@ import React, { useState, useRef } from 'react';
 import {
   Box,
   Button,
-  IconButton,
-  Typography,
   CircularProgress,
-  Tooltip,
-  LinearProgress,
-  Chip,
-  Paper,
   Dialog,
-  DialogTitle,
-  DialogContent,
   DialogActions,
-  Grid
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  LinearProgress,
+  Typography,
 } from '@mui/material';
-import {
-  AttachFile as AttachFileIcon,
-  Close as CloseIcon,
-  InsertDriveFile as FileIcon,
-  Image as ImageIcon,
-  Description as DocumentIcon,
-  PictureAsPdf as PdfIcon,
-  MusicNote as AudioIcon,
-  Videocam as VideoIcon,
-  Code as CodeIcon
-} from '@mui/icons-material';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import CloseIcon from '@mui/icons-material/Close';
+import ImageIcon from '@mui/icons-material/Image';
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
+import { v4 as uuidv4 } from 'uuid';
+import { supabase, getSignedUrl } from '../../supabaseClient';
+import { useAuth } from '../../contexts/AuthContext';
+import SafeImage from './SafeImage';
 
-const MessageAttachmentUploader = ({ 
-  onAttachmentSelected,
-  maxSize = 5 * 1024 * 1024, // 5MB default
-  maxFiles = 5,
-  allowedTypes = "image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,audio/*,video/*"
-}) => {
-  const fileInputRef = useRef(null);
-  const [attachments, setAttachments] = useState([]);
+/**
+ * MessageAttachmentUploader component for uploading file attachments in messages
+ * 
+ * @param {Object} props
+ * @param {Function} props.onUploadComplete - Callback when upload is complete with file data
+ * @param {Function} props.onError - Callback for handling errors
+ */
+const MessageAttachmentUploader = ({ onUploadComplete, onError }) => {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [error, setError] = useState(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewImage, setPreviewImage] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const fileInputRef = useRef(null);
 
-  const handleClick = () => {
-    fileInputRef.current.click();
+  const handleOpen = () => setOpen(true);
+  const handleClose = () => {
+    setOpen(false);
+    setSelectedFile(null);
+    setProgress(0);
   };
 
-  const handleFileChange = (e) => {
-    setError(null);
-    const selectedFiles = Array.from(e.target.files);
-    
-    // Validate file count
-    if (attachments.length + selectedFiles.length > maxFiles) {
-      setError(`You can only upload up to ${maxFiles} files at once`);
-      e.target.value = null;
+  const handleFileSelect = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      // Limit file size to 10MB
+      if (file.size > 10 * 1024 * 1024) {
+        onError?.('File size exceeds 10MB limit');
       return;
-    }
-    
-    // Validate file size
-    const oversizedFiles = selectedFiles.filter(file => file.size > maxSize);
-    if (oversizedFiles.length > 0) {
-      setError(`Some files exceed the ${formatFileSize(maxSize)} limit`);
-      e.target.value = null;
-      return;
-    }
-    
-    if (selectedFiles.length > 0) {
-      const newAttachments = [...attachments];
-      
-      selectedFiles.forEach(file => {
-        // Create preview URL for images
-        if (file.type.startsWith('image/')) {
-          file.previewUrl = URL.createObjectURL(file);
-        }
-        newAttachments.push(file);
-      });
-      
-      setAttachments(newAttachments);
-      
-      // Pass to parent component
-      if (onAttachmentSelected) {
-        onAttachmentSelected(newAttachments);
       }
+      setSelectedFile(file);
     }
+  };
+
+  const handleFileDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     
-    // Clear the input value so the same file can be selected again
-    e.target.value = null;
-  };
-  
-  const handleRemoveFile = (index) => {
-    // Release object URL if it exists
-    if (attachments[index].previewUrl) {
-      URL.revokeObjectURL(attachments[index].previewUrl);
+    const file = event.dataTransfer.files[0];
+    if (file) {
+      // Limit file size to 10MB
+      if (file.size > 10 * 1024 * 1024) {
+        onError?.('File size exceeds 10MB limit');
+      return;
+      }
+      setSelectedFile(file);
     }
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile || !user) return;
     
-    const newAttachments = attachments.filter((_, i) => i !== index);
-    setAttachments(newAttachments);
+    setUploading(true);
+    setProgress(0);
     
-    // Pass to parent component
-    if (onAttachmentSelected) {
-      onAttachmentSelected(newAttachments);
-    }
-  };
-
-  const getFileTypeIcon = (fileType) => {
-    if (fileType.startsWith('image/')) {
-      return <ImageIcon fontSize="small" />;
-    } else if (fileType.startsWith('video/')) {
-      return <VideoIcon fontSize="small" />;
-    } else if (fileType.startsWith('audio/')) {
-      return <AudioIcon fontSize="small" />;
-    } else if (fileType === 'application/pdf') {
-      return <PdfIcon fontSize="small" />;
-    } else if (fileType.includes('document') || fileType.includes('msword')) {
-      return <DocumentIcon fontSize="small" />;
-    } else if (fileType.includes('text/') || fileType.includes('json') || fileType.includes('xml')) {
-      return <CodeIcon fontSize="small" />;
-    }
-    return <FileIcon fontSize="small" />;
-  };
-
-  const formatFileSize = (bytes) => {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / 1048576).toFixed(1) + ' MB';
-  };
-  
-  const handlePreview = (file) => {
-    if (file.previewUrl) {
-      setPreviewImage(file.previewUrl);
-      setPreviewOpen(true);
-    }
-  };
-  
-  const handleClosePreview = () => {
-    setPreviewOpen(false);
-  };
-
-  return (
-    <Box>
-      <input
-        type="file"
-        ref={fileInputRef}
-        style={{ display: 'none' }}
-        onChange={handleFileChange}
-        multiple
-        accept={allowedTypes}
-      />
-
-      <IconButton 
-        color="primary" 
-        onClick={handleClick}
-        disabled={uploading || attachments.length >= maxFiles}
-        size="small"
-      >
-        <AttachFileIcon />
-      </IconButton>
-
-      {error && (
-        <Typography
-          variant="caption"
-          color="error"
-          sx={{ display: 'block', mt: 1 }}
-        >
-          {error}
-        </Typography>
-      )}
-
-      {attachments.length > 0 && (
-        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-          {attachments.map((file, index) => (
-            <Chip
-              key={index}
-              label={file.name.length > 15 ? file.name.substring(0, 12) + '...' : file.name}
-              onDelete={() => handleRemoveFile(index)}
-              onClick={() => file.type.startsWith('image/') && handlePreview(file)}
-              icon={getFileTypeIcon(file.type)}
-              size="small"
-              sx={{
-                maxWidth: 150,
-                '.MuiChip-label': {
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                },
-                cursor: file.type.startsWith('image/') ? 'pointer' : 'default'
-              }}
-            />
-          ))}
-        </Box>
-      )}
-
-      {uploading && (
-        <Box sx={{ mt: 1 }}>
-          <Typography variant="caption" color="text.secondary">
-            Uploading {attachments.length} {attachments.length === 1 ? 'file' : 'files'}...
-          </Typography>
-          <LinearProgress 
-            variant="determinate" 
-            value={uploadProgress} 
-            sx={{ height: 4, borderRadius: 2, mt: 0.5 }}
-          />
-        </Box>
-      )}
+    try {
+      // Generate unique filename
+      const fileExt = selectedFile.name.split('.').pop();
+      const fileName = `${uuidv4()}.${fileExt}`;
+      const filePath = `uploads/${user.id}/${fileName}`;
+      const bucket = 'message-attachments';
       
-      {/* Image Preview Dialog */}
-      <Dialog
-        open={previewOpen}
-        onClose={handleClosePreview}
-        maxWidth="md"
-      >
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          Preview
-          <IconButton edge="end" onClick={handleClosePreview}>
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent>
-          <Box
-            component="img"
-            src={previewImage}
+      // Upload file to Supabase Storage
+      const { error, data } = await supabase.storage
+        .from(bucket)
+        .upload(filePath, selectedFile, {
+          cacheControl: '3600',
+          upsert: false,
+          onUploadProgress: (progress) => {
+            setProgress(Math.round((progress.loaded / progress.total) * 100));
+          }
+        });
+      
+      if (error) throw error;
+      
+      // Get a signed URL for better CORS handling
+      let publicUrl;
+      try {
+        publicUrl = await getSignedUrl(bucket, filePath, 3600); // 1 hour expiry
+        
+        if (!publicUrl) {
+          // Fallback to public URL if signed URL fails
+          publicUrl = supabase.storage.from(bucket).getPublicUrl(filePath).data.publicUrl;
+        }
+      } catch (urlError) {
+        console.error('Error getting signed URL:', urlError);
+        // Fallback to public URL
+        publicUrl = supabase.storage.from(bucket).getPublicUrl(filePath).data.publicUrl;
+      }
+      
+      const fileData = {
+        name: selectedFile.name,
+        type: selectedFile.type,
+        size: selectedFile.size,
+        url: publicUrl,
+        path: filePath,
+        bucket: bucket
+      };
+      
+      onUploadComplete?.(fileData);
+      handleClose();
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      onError?.(error.message || 'Error uploading file');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const getFileIcon = () => {
+    if (!selectedFile) return null;
+    
+    if (selectedFile.type.startsWith('image/')) {
+      return (
+        <Box sx={{ position: 'relative', width: '100%', height: 200, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <SafeImage
+            src={URL.createObjectURL(selectedFile)}
             alt="Preview"
-            sx={{
-              maxWidth: '100%',
-              maxHeight: '70vh',
-              objectFit: 'contain'
+            sx={{ 
+              width: '100%', 
+              height: 200, 
+              display: 'flex', 
+              justifyContent: 'center', 
+              alignItems: 'center' 
             }}
           />
+        </Box>
+      );
+    }
+    
+    return (
+      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2 }}>
+        <InsertDriveFileIcon color="primary" sx={{ fontSize: 60 }} />
+        <Typography variant="body2" color="text.secondary" noWrap sx={{ maxWidth: '100%' }}>
+          {selectedFile.name}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {Math.round(selectedFile.size / 1024)} KB
+        </Typography>
+      </Box>
+    );
+  };
+
+  // Component for triggering file upload
+  const TriggerButton = (
+    <IconButton onClick={handleOpen} color="primary" size="medium">
+      <AttachFileIcon />
+    </IconButton>
+  );
+
+  return (
+    <>
+      {TriggerButton}
+      
+      <Dialog open={open} onClose={!uploading ? handleClose : undefined} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Attach File
+          {!uploading && (
+      <IconButton 
+              aria-label="close"
+              onClick={handleClose}
+              sx={{ position: 'absolute', right: 8, top: 8 }}
+            >
+              <CloseIcon />
+      </IconButton>
+          )}
+        </DialogTitle>
+        
+        <DialogContent>
+          {!selectedFile ? (
+            <Box
+              sx={{
+                border: '2px dashed #ccc',
+                borderRadius: 1,
+                p: 3,
+                textAlign: 'center',
+                cursor: 'pointer',
+                '&:hover': { borderColor: 'primary.main' }
+              }}
+              onClick={() => fileInputRef.current?.click()}
+              onDrop={handleFileDrop}
+              onDragOver={handleDragOver}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                style={{ display: 'none' }}
+                accept="image/*,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              />
+              <ImageIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
+              <Typography variant="body1" gutterBottom>
+                Drag & drop a file here or click to browse
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Maximum file size: 10MB
+              </Typography>
+        </Box>
+          ) : (
+            <Box sx={{ mt: 2 }}>
+              {getFileIcon()}
+
+      {uploading && (
+                <Box sx={{ width: '100%', mt: 2 }}>
+                  <LinearProgress variant="determinate" value={progress} />
+                  <Typography variant="caption" color="text.secondary" align="center" display="block" sx={{ mt: 1 }}>
+                    {progress}% Uploaded
+          </Typography>
+                </Box>
+              )}
+        </Box>
+      )}
         </DialogContent>
+        
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button 
+            onClick={handleClose} 
+            disabled={uploading}
+            variant="outlined"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleUpload}
+            disabled={!selectedFile || uploading}
+            variant="contained"
+            startIcon={uploading && <CircularProgress size={16} color="inherit" />}
+          >
+            {uploading ? 'Uploading...' : 'Upload'}
+          </Button>
+        </DialogActions>
       </Dialog>
-    </Box>
+    </>
   );
 };
 

@@ -66,6 +66,14 @@ async function debugMessagingContext() {
     
     // Now try the actual query from the MessagingContext
     console.log('\nExecuting full query from MessagingContext...');
+    // Add this check before the main query
+    const { data: schemaCheck, error: schemaError } = await supabase
+      .rpc('get_schema_version', { schema_name: 'public' });
+    
+    if (schemaError) {
+      console.error('Schema version check failed:', schemaError);
+      return;
+    }
     const { data, error } = await supabase
       .from('conversations')
       .select(`
@@ -157,4 +165,4 @@ async function debugMessagingContext() {
   }
 }
 
-debugMessagingContext().catch(console.error); 
+debugMessagingContext().catch(console.error);

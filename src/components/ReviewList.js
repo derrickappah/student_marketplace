@@ -8,26 +8,41 @@ import {
   Paper,
   CircularProgress,
   Alert,
+  IconButton,
+  Tooltip,
+  Chip,
 } from '@mui/material';
 import { formatDistanceToNow } from 'date-fns';
-import { getUserReviews, getUserRating } from '../services/supabase';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { useAuth } from '../contexts/AuthContext';
 
-const ReviewList = ({ userId }) => {
+const ReviewList = ({ 
+  userId, 
+  listingId, 
+  reviewType = 'seller',
+  onEdit,
+  onDelete,
+  getReviews,
+  getRating,
+}) => {
+  const { user } = useAuth();
   const [reviews, setReviews] = useState([]);
-  const [userRating, setUserRating] = useState({ rating: 0, count: 0 });
+  const [rating, setRating] = useState({ rating: 0, count: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     const fetchReviews = async () => {
       try {
         const [reviewsData, ratingData] = await Promise.all([
-          getUserReviews(userId),
-          getUserRating(userId),
+          getReviews(reviewType === 'seller' ? userId : listingId),
+          getRating(reviewType === 'seller' ? userId : listingId),
         ]);
 
         setReviews(reviewsData.data || []);
-        setUserRating(ratingData);
+        setRating(ratingData);
       } catch (err) {
         console.error('Error fetching reviews:', err);
         setError('Failed to load reviews');
@@ -37,7 +52,7 @@ const ReviewList = ({ userId }) => {
     };
 
     fetchReviews();
-  }, [userId]);
+  }, [userId, listingId, reviewType]);
 
   if (loading) {
     return (
@@ -55,56 +70,99 @@ const ReviewList = ({ userId }) => {
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Rating value={userRating.rating} precision={0.5} readOnly />
+          <Rating value={rating.rating} precision={0.5} readOnly />
           <Typography variant="h6" sx={{ ml: 1 }}>
-            {userRating.rating.toFixed(1)}
+            {rating.rating.toFixed(1)}
           </Typography>
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>
-          ({userRating.count} {userRating.count === 1 ? 'review' : 'reviews'})
+          ({rating.count} {rating.count === 1 ? 'review' : 'reviews'})
         </Typography>
       </Box>
 
       {reviews.length === 0 ? (
         <Typography color="text.secondary">
-          This seller has no reviews yet.
+          No reviews yet.
         </Typography>
       ) : (
         <Box>
           {reviews.map((review) => (
             <Paper key={review.id} sx={{ p: 2, mb: 2 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 1 }}>
                 <Avatar
                   src={review.reviewer?.avatar_url}
                   alt={review.reviewer?.name || 'User'}
                   sx={{ width: 32, height: 32, mr: 1 }}
-                />
-                <Typography variant="subtitle2">
-                  {review.reviewer?.name || 'Anonymous'}
-                </Typography>
-              </Box>
-              <Rating value={review.rating} size="small" readOnly />
-              <Typography variant="body2" sx={{ mt: 1 }}>
-                {review.comment}
-              </Typography>
-              {review.listing && (
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: 'block', mt: 1 }}
                 >
-                  For: {review.listing.title}
-                </Typography>
-              )}
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: 'block', mt: 0.5 }}
-              >
-                {formatDistanceToNow(new Date(review.created_at), {
-                  addSuffix: true,
-                })}
-              </Typography>
+                  {(review.reviewer?.name || 'U').charAt(0).toUpperCase()}
+                </Avatar>
+                
+                <Box sx={{ flexGrow: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="subtitle2">
+                      {review.reviewer?.name || 'Anonymous'}
+                      {user && review.reviewer_id === user.id && (
+                        <Chip 
+                          size="small" 
+                          label="Your Review" 
+                          color="primary" 
+                          variant="outlined" 
+                          sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
+                        />
+                      )}
+                    </Typography>
+                    
+                    {user && review.reviewer_id === user.id && (
+                      <Box>
+                        <Tooltip title="Edit Review">
+                          <IconButton 
+                            size="small" 
+                            color="primary" 
+                            onClick={() => onEdit(review)}
+                            disabled={deleteLoading}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete Review">
+                          <IconButton 
+                            size="small" 
+                            color="error" 
+                            onClick={() => onDelete(review.id)}
+                            disabled={deleteLoading}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    )}
+                  </Box>
+                  
+                  <Rating 
+                    value={review.rating} 
+                    readOnly 
+                    size="small" 
+                    precision={0.5}
+                    sx={{ my: 0.5 }}
+                  />
+                  
+                  <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-line' }}>
+                    {review.comment}
+                  </Typography>
+                  
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', mt: 0.5 }}
+                  >
+                    {review.updated_at && review.updated_at !== review.created_at ? (
+                      <>Updated {formatDistanceToNow(new Date(review.updated_at), { addSuffix: true })}</>
+                    ) : (
+                      formatDistanceToNow(new Date(review.created_at), { addSuffix: true })
+                    )}
+                  </Typography>
+                </Box>
+              </Box>
             </Paper>
           ))}
         </Box>
@@ -113,4 +171,4 @@ const ReviewList = ({ userId }) => {
   );
 };
 
-export default ReviewList; 
+export default ReviewList;

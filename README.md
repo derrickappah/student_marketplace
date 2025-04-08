@@ -52,15 +52,37 @@ The application will be available at `http://localhost:3000`.
 
 ## Project Structure
 
+The project has been organized into a logical directory structure for better maintainability and navigation. For a complete guide to the project's organization, please see [PROJECT_STRUCTURE.md](./PROJECT_STRUCTURE.md).
+
+Main directories:
+
 ```
-src/
-├── components/       # Reusable UI components
-├── pages/           # Page components
-├── hooks/           # Custom React hooks
-├── contexts/        # React Context providers
-├── services/        # API and Supabase services
-└── assets/          # Static assets
+/
+├── src/              # Application source code
+│   ├── components/   # Reusable UI components
+│   ├── pages/        # Page components
+│   ├── hooks/        # Custom React hooks
+│   ├── contexts/     # React Context providers
+│   ├── services/     # API and Supabase services
+│   └── assets/       # Static assets
+│
+├── db/               # Database-related files
+│   ├── migrations/   # Database migrations
+│   ├── scripts/      # Database scripts
+│   └── sql/          # SQL queries and fixes
+│
+├── scripts/          # Utility scripts
+│   ├── batch/        # Batch scripts for various operations
+│   ├── deployment/   # Deployment scripts
+│   └── utilities/    # General utility scripts
+│
+└── docs/             # Documentation
+    ├── project/      # Project planning and management
+    ├── technical/    # Technical documentation
+    └── migration/    # Migration guides
 ```
+
+For easy navigation of the project structure, open `project-dashboard.html` in your browser.
 
 ## Database Schema
 
@@ -71,7 +93,7 @@ The application uses Supabase with the following main tables:
 - messages
 - notifications
 
-For detailed schema information, see the database documentation.
+For detailed schema information, see the database documentation in the `docs/technical/database` directory.
 
 ## Contributing
 

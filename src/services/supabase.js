@@ -317,7 +317,7 @@ export const getListings = async ({
       .from('listings')
       .select(`
         *,
-        users (name, university),
+        users (id, name, university),
         category:category_id (id, name)
       `, { count: 'exact' })
       .eq('status', 'available');
@@ -950,7 +950,8 @@ export const getMessages = async (conversationId) => {
             
             // Try to create the profile in the background
             setTimeout(() => {
-              createBasicUserProfile(message.sender_id)
+              // Use exported function
+              exports.createBasicUserProfile(message.sender_id)
                 .then(() => console.log('Created user profile for', message.sender_id))
                 .catch(err => console.error('Failed to create user profile:', err));
             }, 100);
@@ -1084,19 +1085,24 @@ export const getConversations = async () => {
       throw new Error('User not authenticated');
     }
     
-    // Use direct query to fetch conversations instead of the database function
-    // that has issues with read_status column
+    // Find the participant records for the current user
+    const { data: participantRecords } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', user.id);
+    
+    if (!participantRecords || participantRecords.length === 0) {
+      return { data: [], error: null };
+    }
+    
+    // Get all conversation IDs the user is part of
+    const conversationIds = participantRecords.map(p => p.conversation_id);
+    
+    // Fetch conversations without trying to embed listings directly
     const { data: conversations, error } = await supabase
       .from('conversations')
-      .select(`
-        *,
-        participants:conversation_participants(
-          user_id,
-          user:users(id, name, avatar_url, email, university)
-        ),
-        listing:listings(id, title, price, images, status, description, seller_id),
-        latest_message:messages(id, content, created_at, sender_id, has_attachments)
-      `)
+      .select('*')
+      .in('id', conversationIds)
       .order('updated_at', { ascending: false });
     
     if (error) {
@@ -1104,13 +1110,40 @@ export const getConversations = async () => {
       throw new Error(`Failed to load conversations: ${error.message}`);
     }
     
-    // Process the data for easier frontend use
-    const processedConversations = (conversations || []).map(conversation => {
-      // Find the other participants (excluding current user)
-      const otherParticipants = (conversation.participants || [])
+    // Fetch additional data separately
+    const conversationData = await Promise.all(conversations.map(async conversation => {
+      // Get participants
+      const { data: participants } = await supabase
+        .from('conversation_participants')
+        .select('user_id, user:users(id, name, avatar_url, email, university)')
+        .eq('conversation_id', conversation.id);
+      
+      // Get listing if available
+      let listing = null;
+      if (conversation.listing_id) {
+        const { data: listingData } = await supabase
+          .from('listings')
+          .select('id, title, price, images, status, description, seller_id')
+          .eq('id', conversation.listing_id)
+          .maybeSingle();
+        
+        listing = listingData;
+      }
+      
+      // Get latest message
+      const { data: messages } = await supabase
+        .from('messages')
+        .select('id, content, created_at, sender_id, has_attachments')
+        .eq('conversation_id', conversation.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      const latestMessage = messages && messages.length > 0 ? messages[0] : null;
+      
+      // Find other participants (excluding current user)
+      const otherParticipants = (participants || [])
         .filter(participant => participant.user_id !== user.id)
         .map(p => {
-          // If user data is missing, create a placeholder profile
           if (!p.user) {
             return {
               id: p.user_id,
@@ -1118,33 +1151,30 @@ export const getConversations = async () => {
               avatar_url: null,
               email: null,
               university: null,
-              _placeholder: true // Mark as placeholder
+              _placeholder: true
             };
           }
           return p.user;
         });
       
-      // Get the most recent message
-      const messages = conversation.latest_message || [];
-      const latestMessage = messages.length > 0 ? messages[0] : null;
-      
       return {
         ...conversation,
-        otherParticipants,
+        participants,
+        listing,
         latestMessage,
-        unseen_messages: 0 // We'll handle this separately if needed
+        otherParticipants,
+        unseen_messages: 0
       };
-    });
+    }));
     
     // After processing all conversations, try to fetch missing user profiles
-    // This happens asynchronously and won't block the initial display
     setTimeout(() => {
-      processedConversations.forEach(conversation => {
+      conversationData.forEach(conversation => {
         conversation.otherParticipants.forEach(async participant => {
           if (participant._placeholder) {
             try {
-              // Create profile in the background
-              await createBasicUserProfile(participant.id);
+              // Use exported function
+              await exports.createBasicUserProfile(participant.id);
             } catch (err) {
               console.error('Error creating basic profile:', err);
             }
@@ -1153,57 +1183,10 @@ export const getConversations = async () => {
       });
     }, 100);
     
-    return { data: processedConversations, error: null };
+    return { data: conversationData, error: null };
   } catch (error) {
     console.error('Error in getConversations:', error);
     return { data: [], error };
-  }
-};
-
-// Helper to create a basic user profile
-const createBasicUserProfile = async (userId) => {
-  try {
-    if (!userId) return { success: false, error: 'No user ID provided' };
-    
-    // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', userId)
-      .single();
-    
-    if (existingUser) return { success: true }; // Already exists
-    
-    // Create a basic profile
-    const { error } = await supabase
-      .from('users')
-      .insert([{
-        id: userId,
-        email: `user-${userId.substring(0, 8)}@example.com`,
-        name: `User ${userId.substring(0, 6)}`,
-        university: 'Unknown University',
-        created_at: new Date().toISOString()
-      }]);
-    
-    if (error) {
-      console.error('Error creating basic user profile:', error);
-      return { success: false, error: error.message };
-    }
-    
-    // Notify interested components of the update using a custom event
-    try {
-      const event = new CustomEvent('userProfileCreated', { 
-        detail: { userId } 
-      });
-      window.dispatchEvent(event);
-    } catch (e) {
-      console.log('Could not dispatch profile created event:', e);
-    }
-    
-    return { success: true };
-  } catch (err) {
-    console.error('Exception creating basic profile:', err);
-    return { success: false, error: err.message };
   }
 };
 
@@ -1474,24 +1457,96 @@ export const getCategories = async () => {
 };
 
 // Reviews and Ratings functions
-export const createReview = async ({ sellerId, listingId, rating, comment }) => {
-  const { data: { user } } = await supabase.auth.getUser();
-  
-  if (!user) throw new Error('User not authenticated');
-
-  const { data, error } = await supabase
-    .from('reviews')
-    .insert({
-      reviewer_id: user.id,
-      seller_id: sellerId,
-      listing_id: listingId,
+export const createReview = async (reviewData) => {
+  try {
+    // Handle both parameter formats
+    const {
+      sellerId, // May not be needed directly for product reviews if fetched from listing
+      listingId,
       rating,
       comment,
-    })
-    .select();
+      reviewType = 'seller', // Default to 'seller' if not provided
+      reviewer_id
+    } = reviewData;
 
-  if (error) throw error;
-  return { data, error: null };
+    // Validate required fields
+    if (!rating) {
+      throw new Error('Rating is required');
+    }
+    // Allow empty comments, but ensure it's a string
+    const finalComment = comment || '';
+
+    // Get the current user if reviewer_id is not provided
+    const { data: { user } } = await supabase.auth.getUser();
+    const currentUserId = reviewer_id || user?.id;
+
+    if (!currentUserId) {
+      throw new Error('You must be logged in or provide a reviewer_id to create a review');
+    }
+
+    let finalSellerId = sellerId;
+
+    // If it's a product review, we must have listingId and fetch seller_id from the listing
+    if (reviewType === 'product') {
+      if (!listingId) {
+        throw new Error('Listing ID is required for product reviews');
+      }
+      // Fetch the seller_id from the listing
+      const { data: listing, error: listingError } = await supabase
+        .from('listings')
+        .select('user_id') // user_id is the seller_id in the listings table
+        .eq('id', listingId)
+        .single();
+
+      if (listingError || !listing) {
+        console.error('Error fetching listing for review:', listingError);
+        throw new Error(`Failed to get listing information (ID: ${listingId}): ${listingError?.message || 'Listing not found'}`);
+      }
+      finalSellerId = listing.user_id; // The seller is the owner of the listing
+    } else if (!finalSellerId) {
+      // For seller reviews, sellerId is required directly
+      throw new Error('Seller ID is required for seller reviews');
+    }
+
+    const reviewToCreate = {
+      reviewer_id: currentUserId,
+      rating,
+      comment: finalComment, // Use the validated comment
+      review_type: reviewType,
+      seller_id: finalSellerId, // Use the determined seller ID
+      listing_id: reviewType === 'product' ? listingId : null, // Correctly assign listing_id for product reviews
+      created_at: new Date().toISOString(),
+      // updated_at will be handled by the trigger or default value
+    };
+
+    console.log('Attempting to insert review:', reviewToCreate);
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .insert([reviewToCreate])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating review in database:', error);
+      // Check for specific Supabase errors if needed
+      if (error.code === '23503') { // foreign key violation
+          throw new Error(`Invalid reference: Ensure seller ID (${finalSellerId}) and listing ID (${listingId}) exist.`);
+      }
+      if (error.code === '23514') { // check constraint violation (e.g., rating)
+          throw new Error(`Invalid data: ${error.message}`);
+      }
+      throw error; // Re-throw other errors
+    }
+
+    console.log('Review created successfully:', data);
+    return { data }; // Return the created review data
+  } catch (error) {
+    // Log the detailed error and re-throw a user-friendly message
+    console.error('Error caught in createReview function:', error);
+    // Avoid exposing detailed SQL errors to the frontend if possible
+    throw new Error(`Failed to create review: ${error.message}`);
+  }
 };
 
 export const getUserReviews = async (userId) => {
@@ -1503,6 +1558,7 @@ export const getUserReviews = async (userId) => {
       .from('reviews')
       .select('*')
       .eq('seller_id', userId)
+      .eq('review_type', 'seller') // Only get seller reviews
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -1571,7 +1627,8 @@ export const getUserRating = async (userId) => {
   const { data, error } = await supabase
     .from('reviews')
     .select('rating')
-    .eq('seller_id', userId);
+    .eq('seller_id', userId)
+    .eq('review_type', 'seller'); // Only consider seller reviews for user rating
 
   if (error) throw error;
   
@@ -2047,30 +2104,34 @@ export const trackListingView = async (listingId) => {
     // Skip if no user is logged in
     if (!user) return { success: false, error: "User not authenticated" };
     
-    // Check if this user has already viewed this listing recently (last 24 hours)
-    const oneDayAgo = new Date();
-    oneDayAgo.setDate(oneDayAgo.getDate() - 1);
+    const currentTime = new Date().toISOString();
     
+    // Check if this user has already viewed this listing
     const { data: existingView, error: checkError } = await supabase
       .from('viewed_listings')
       .select('id')
       .eq('user_id', user.id)
       .eq('listing_id', listingId)
-      .gte('viewed_at', oneDayAgo.toISOString())
-      .single();
+      .maybeSingle();
       
-    // If there's already a recent view, don't add another one
+    // If there's already a view from this user for this listing, update it
     if (!checkError && existingView) {
+      const { error: updateError } = await supabase
+        .from('viewed_listings')
+        .update({ viewed_at: currentTime })
+        .eq('id', existingView.id);
+        
+      if (updateError) throw updateError;
       return { success: true, error: null };
     }
     
-    // Insert a new view record
+    // Insert a new view record if no existing view
     const { error } = await supabase
       .from('viewed_listings')
       .insert({
         listing_id: listingId,
         user_id: user.id,
-        viewed_at: new Date().toISOString()
+        viewed_at: currentTime
       });
       
     if (error) throw error;
@@ -2372,6 +2433,9 @@ export const createOrGetConversation = async ({ receiverId, listingId, initialMe
       console.error('User not authenticated');
       return { conversation: null, error: 'User not authenticated' };
     }
+    
+    // Ensure the seller has a profile - this helps with the "Unknown User" issue
+    await createBasicUserProfile(receiverId);
     
     // Use our RLS-bypassing function to create or get a conversation
     console.log('Using RLS-bypassing function to create or get conversation');
@@ -4296,5 +4360,118 @@ export const checkTableStructure = async (tableName) => {
       success: false, 
       error: error.message || `Unknown error checking table structure` 
     };
+  }
+};
+
+export const upgradeReviewsTable = async () => {
+  try {
+    console.log('Checking reviews table schema...');
+    
+    // First check if review_type column exists by selecting from reviews
+    // and filtering by review_type
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('review_type')
+      .eq('review_type', 'product')
+      .limit(1);
+    
+    if (!error) {
+      console.log('review_type column already exists');
+      return { success: true, message: 'review_type column already exists' };
+    }
+    
+    console.log('review_type column does not exist, adding it...');
+    
+    // Try adding the column with direct SQL
+    const { error: sqlError } = await supabase.rpc(
+      'run_sql', 
+      { 
+        query: `
+          ALTER TABLE reviews 
+          ADD COLUMN review_type TEXT DEFAULT 'seller' 
+          CHECK (review_type IN ('seller', 'product'));
+          
+          -- Update existing reviews
+          UPDATE reviews SET review_type = 'seller' WHERE review_type IS NULL;
+        `
+      }
+    );
+    
+    if (sqlError) {
+      console.error('Error executing SQL:', sqlError);
+      
+      // Fall back to another approach - update via REST API
+      console.log('Falling back to client-side workaround...');
+      return { 
+        success: false, 
+        clientSideWorkaround: true,
+        message: 'Cannot add column: ' + sqlError.message
+      };
+    }
+    
+    console.log('Successfully added review_type column');
+    return { success: true, message: 'Added review_type column to reviews table' };
+  } catch (error) {
+    console.error('Error upgrading reviews table:', error);
+    return { 
+      success: false, 
+      error: error.message,
+      message: `Could not upgrade reviews table: ${error.message}. Using client-side workaround.`
+    };
+  }
+};
+
+// Function to create a basic user profile if it doesn't exist
+export const createBasicUserProfile = async (userId) => {
+  try {
+    if (!userId) {
+      console.error('No user ID provided');
+      return { success: false, error: 'User ID is required' };
+    }
+    
+    // Check if user exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', userId)
+      .maybeSingle();
+    
+    // If user exists, no need to create
+    if (existingUser) {
+      return { success: true, message: 'User already exists' };
+    }
+    
+    // Create basic user profile
+    const { data, error } = await supabase
+      .from('users')
+      .insert({
+        id: userId,
+        name: `User ${userId.substring(0, 8)}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Error creating basic user profile:', error);
+      return { success: false, error: error.message };
+    }
+    
+    // Add offline status
+    await supabase
+      .from('user_status')
+      .insert({
+        user_id: userId,
+        status: 'offline',
+        last_active: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .single();
+    
+    return { success: true, data };
+  } catch (error) {
+    console.error('Exception in createBasicUserProfile:', error);
+    return { success: false, error: error.message };
   }
 };

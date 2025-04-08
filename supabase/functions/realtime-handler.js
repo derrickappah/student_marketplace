@@ -113,6 +113,25 @@ async function broadcastListingUpdate(supabase, { listingId, updateType, details
 
 // Notify a user about a new message
 async function notifyNewMessage(supabase, { conversationId, senderId, recipientId, message }) {
+  // Add validation for message content
+  if (typeof message !== 'string' || message.trim().length === 0) {
+    throw new Error('Message content is required');
+  }
+
+  // Add rate limiting check
+  const { data: recentMessages } = await supabase
+    .from('messages')
+    .select('created_at')
+    .eq('sender_id', senderId)
+    .order('created_at', { ascending: false })
+    .limit(5);
+  
+  if (recentMessages.length >= 5) {
+    const oldest = new Date(recentMessages[4].created_at);
+    if (Date.now() - oldest < 10000) { // 10 seconds
+      throw new Error('Message rate limit exceeded');
+    }
+  }
   try {
     // Validate the input
     if (!conversationId || !senderId || !recipientId) {
@@ -265,4 +284,4 @@ async function notifyOfferUpdate(supabase, { offerId, updateType }) {
     console.error('Error in notifyOfferUpdate:', error);
     throw error;
   }
-} 
+}

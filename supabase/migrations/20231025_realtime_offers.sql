@@ -55,11 +55,11 @@ BEGIN
   ELSE
     CASE notification_type
       WHEN 'new_offer' THEN
-        message_text := 'New offer of $' || offer_record.amount || ' for "' || offer_record.listing_title || '" from ' || offer_record.buyer_name;
+        message_text := 'New offer of GHC ' || offer_record.amount || ' for "' || offer_record.listing_title || '" from ' || offer_record.buyer_name;
       WHEN 'offer_accepted' THEN
-        message_text := 'Your offer of $' || offer_record.amount || ' for "' || offer_record.listing_title || '" was accepted';
+        message_text := 'Your offer of GHC ' || offer_record.amount || ' for "' || offer_record.listing_title || '" was accepted';
       WHEN 'offer_declined' THEN
-        message_text := 'Your offer of $' || offer_record.amount || ' for "' || offer_record.listing_title || '" was declined';
+        message_text := 'Your offer of GHC ' || offer_record.amount || ' for "' || offer_record.listing_title || '" was declined';
       WHEN 'offer_updated' THEN
         message_text := 'Offer updated for "' || offer_record.listing_title || '"';
       ELSE
@@ -100,7 +100,7 @@ BEGIN
       WHEN receiver_id = offer_record.seller_id THEN offer_record.buyer_id
       ELSE offer_record.seller_id
     END,
-    '$' || offer_record.amount::TEXT || ' - ' || 
+    'GHC ' || offer_record.amount::TEXT || ' - ' || 
     CASE WHEN offer_record.message IS NOT NULL AND LENGTH(offer_record.message) > 0
          THEN SUBSTRING(offer_record.message, 1, 50) || CASE WHEN LENGTH(offer_record.message) > 50 THEN '...' ELSE '' END
          ELSE 'No message included'
@@ -208,4 +208,4 @@ END;
 $$;
 
 -- Grant execute permissions
-GRANT EXECUTE ON FUNCTION public.subscribe_to_user_offers(UUID) TO authenticated; 
+GRANT EXECUTE ON FUNCTION public.subscribe_to_user_offers(UUID) TO authenticated;

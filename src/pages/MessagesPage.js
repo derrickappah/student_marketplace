@@ -64,9 +64,9 @@ import {
 import { useMessaging } from '../contexts/MessagingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../supabaseClient';
-import { MessageBubble, MessageAttachmentUploader, TypingIndicator, MESSAGE_STATUS, downloadAttachment } from '../components/messaging';
+import { MessageBubble, MessageAttachmentUploader, TypingIndicator, MESSAGE_STATUS } from '../components/messaging';
 import { formatDistanceToNow, format } from 'date-fns';
-import { getConversations, getMessages, sendMessage, subscribeToMessages, trackConversationPresence, subscribeToTypingIndicators, sendTypingIndicator, updateUserPresence, getOnlineUsers, downloadConversationAttachments } from "../services/supabase";
+import { getConversations, getMessages, sendMessage, subscribeToMessages, trackConversationPresence, subscribeToTypingIndicators, sendTypingIndicator, updateUserPresence, getOnlineUsers, downloadConversationAttachments, downloadMessageAttachment as downloadAttachment } from "../services/supabase";
 
 // New component for conversation item
 const ConversationItem = ({ conversation, isActive, onClick, currentUserId }) => {
@@ -207,14 +207,16 @@ const ConversationHeader = ({ conversation, onBack, isMobile }) => {
   const currentUserId = useAuth().user?.id;
   
   // Get the other participant with better fallbacks
-  const otherUser = conversation?.participants?.find(p => p?.id !== currentUserId) || 
+  const otherUser = conversation?.participants?.find(p => p?.user_id !== currentUserId)?.user || 
                    conversation?.otherParticipants?.[0] || 
-                   { id: 'unknown', name: 'Unknown User', status: 'offline' };
+                   {};
   
   const displayName = otherUser?.name || 
                      (otherUser?.email ? otherUser.email.split('@')[0] : null) || 
-                     'Unknown User';
-  const userInitial = displayName.charAt(0).toUpperCase() || 'U';
+                     `User ${(otherUser?.id || '').substring(0, 8)}`;
+                     
+  const userInitial = (displayName || 'U').charAt(0).toUpperCase();
+  const isOnline = otherUser?.status === 'online';
   
   const handleMenuOpen = (event) => {
     setMenuAnchor(event.currentTarget);
@@ -302,8 +304,8 @@ const ConversationHeader = ({ conversation, onBack, isMobile }) => {
           overlap="circular"
           anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
           variant="dot"
-          color={otherUser?.status === 'online' ? 'success' : 'default'}
-          invisible={otherUser?.status !== 'online'}
+          color={isOnline ? 'success' : 'default'}
+          invisible={!isOnline}
         >
           <Avatar 
             src={otherUser?.avatar_url} 
@@ -319,7 +321,7 @@ const ConversationHeader = ({ conversation, onBack, isMobile }) => {
             {displayName}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            {otherUser?.status === 'online' ? 'Online' : 'Offline'}
+            {isOnline ? 'Online' : 'Offline'}
           </Typography>
         </Box>
       </Box>
@@ -881,9 +883,12 @@ const MessagesPage = () => {
     const showName = !isOwnMessage && 
       (index === 0 || messages[index - 1].sender_id !== message.sender_id);
     
+    // Generate a unique ID for the message if it doesn't have one
+    const messageId = message.id || `temp-${Date.now()}-${index}`;
+    
     return (
       <Box 
-        key={message.id || `temp-${message.temp_id}`}
+        key={messageId}
         sx={{ 
           position: 'relative',
           '&:hover .message-actions': {

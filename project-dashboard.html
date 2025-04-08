@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Structure Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        .directory {
+            margin-top: 10px;
+            margin-bottom: 20px;
+        }
+        .directory-item {
+            margin-left: 20px;
+            margin-bottom: 5px;
+        }
+        .category {
+            font-weight: bold;
+            color: #0066cc;
+        }
+        .subcategory {
+            margin-left: 20px;
+            color: #0099cc;
+        }
+        .item {
+            margin-left: 40px;
+            color: #333;
+        }
+        .search {
+            padding: 10px;
+            margin-bottom: 20px;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .nav-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        .nav-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: #f1f1f1;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            margin-right: 5px;
+            border-radius: 5px 5px 0 0;
+        }
+        .nav-tab.active {
+            background-color: white;
+            border-bottom: 1px solid white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Project Structure Dashboard</h1>
+        
+        <input type="text" class="search" id="search" placeholder="Search for files or directories...">
+        
+        <div class="nav-tabs">
+            <div class="nav-tab active" data-tab="structure">Structure</div>
+            <div class="nav-tab" data-tab="database">Database</div>
+            <div class="nav-tab" data-tab="scripts">Scripts</div>
+            <div class="nav-tab" data-tab="docs">Documentation</div>
+            <div class="nav-tab" data-tab="source">Source Code</div>
+        </div>
+        
+        <!-- Structure Tab -->
+        <div id="structure" class="tab-content active">
+            <h2>Directory Structure</h2>
+            
+            <div class="section">
+                <h3>Project Overview</h3>
+                <div class="directory">
+                    <div class="directory-item category">📁 /db/</div>
+                    <div class="directory-item subcategory">📁 /db/migrations/</div>
+                    <div class="directory-item subcategory">📁 /db/scripts/</div>
+                    <div class="directory-item subcategory">📁 /db/sql/</div>
+                    <div class="directory-item item">📁 /db/sql/migrations/</div>
+                    <div class="directory-item item">📁 /db/sql/fixes/</div>
+                    <div class="directory-item item">📁 /db/sql/functions/</div>
+                    
+                    <div class="directory-item category">📁 /docs/</div>
+                    <div class="directory-item subcategory">📁 /docs/migration/</div>
+                    <div class="directory-item subcategory">📁 /docs/project/</div>
+                    <div class="directory-item subcategory">📁 /docs/technical/</div>
+                    <div class="directory-item item">📁 /docs/technical/database/</div>
+                    <div class="directory-item item">📁 /docs/technical/deployment/</div>
+                    <div class="directory-item item">📁 /docs/technical/fixes/</div>
+                    
+                    <div class="directory-item category">📁 /scripts/</div>
+                    <div class="directory-item subcategory">📁 /scripts/batch/</div>
+                    <div class="directory-item item">📁 /scripts/batch/startup/</div>
+                    <div class="directory-item item">📁 /scripts/batch/deployment/</div>
+                    <div class="directory-item item">📁 /scripts/batch/database/</div>
+                    <div class="directory-item subcategory">📁 /scripts/deployment/</div>
+                    <div class="directory-item subcategory">📁 /scripts/utilities/</div>
+                    <div class="directory-item item">📁 /scripts/utilities/tests/</div>
+                    <div class="directory-item item">📁 /scripts/utilities/database/</div>
+                    <div class="directory-item item">📁 /scripts/utilities/messaging/</div>
+                    
+                    <div class="directory-item category">📁 /src/</div>
+                    <div class="directory-item subcategory">📁 /src/assets/</div>
+                    <div class="directory-item subcategory">📁 /src/components/</div>
+                    <div class="directory-item subcategory">📁 /src/contexts/</div>
+                    <div class="directory-item subcategory">📁 /src/hooks/</div>
+                    <div class="directory-item subcategory">📁 /src/pages/</div>
+                    <div class="directory-item subcategory">📁 /src/services/</div>
+                    <div class="directory-item subcategory">📁 /src/sql/</div>
+                    <div class="directory-item subcategory">📁 /src/utils/</div>
+                    
+                    <div class="directory-item category">📁 /backup-files/</div>
+                    <div class="directory-item category">📁 /temp-files/</div>
+                    <div class="directory-item category">📁 /public/</div>
+                    <div class="directory-item category">📁 /build/</div>
+                    <div class="directory-item category">📁 /supabase/</div>
+                    <div class="directory-item category">📁 /sql-chunks/</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Database Tab -->
+        <div id="database" class="tab-content">
+            <h2>Database Resources</h2>
+            
+            <div class="section">
+                <h3>Database Organization</h3>
+                <div class="directory">
+                    <div class="directory-item category">📁 /db/migrations/</div>
+                    <div class="directory-item category">📁 /db/scripts/</div>
+                    <div class="directory-item category">📁 /db/sql/migrations/</div>
+                    <div class="directory-item category">📁 /db/sql/fixes/</div>
+                    <div class="directory-item category">📁 /db/sql/functions/</div>
+                    <div class="directory-item category">📁 /scripts/utilities/database/</div>
+                    <div class="directory-item category">📁 /scripts/batch/database/</div>
+                    <div class="directory-item category">📁 /docs/technical/database/</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Scripts Tab -->
+        <div id="scripts" class="tab-content">
+            <h2>Scripts & Utilities</h2>
+            
+            <div class="section">
+                <h3>Scripts Organization</h3>
+                <div class="directory">
+                    <div class="directory-item category">📁 /scripts/batch/</div>
+                    <div class="directory-item subcategory">📁 /scripts/batch/startup/</div>
+                    <div class="directory-item subcategory">📁 /scripts/batch/deployment/</div>
+                    <div class="directory-item subcategory">📁 /scripts/batch/database/</div>
+                    
+                    <div class="directory-item category">📁 /scripts/deployment/</div>
+                    
+                    <div class="directory-item category">📁 /scripts/utilities/</div>
+                    <div class="directory-item subcategory">📁 /scripts/utilities/tests/</div>
+                    <div class="directory-item subcategory">📁 /scripts/utilities/database/</div>
+                    <div class="directory-item subcategory">📁 /scripts/utilities/messaging/</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Documentation Tab -->
+        <div id="docs" class="tab-content">
+            <h2>Documentation</h2>
+            
+            <div class="section">
+                <h3>Documentation Organization</h3>
+                <div class="directory">
+                    <div class="directory-item category">📁 /docs/migration/</div>
+                    <div class="directory-item category">📁 /docs/project/</div>
+                    <div class="directory-item category">📁 /docs/technical/</div>
+                    <div class="directory-item subcategory">📁 /docs/technical/database/</div>
+                    <div class="directory-item subcategory">📁 /docs/technical/deployment/</div>
+                    <div class="directory-item subcategory">📁 /docs/technical/fixes/</div>
+                </div>
+                
+                <h3>Key Documentation Files</h3>
+                <div class="directory">
+                    <div class="directory-item">📄 /PROJECT_STRUCTURE.md - Project organization guide</div>
+                    <div class="directory-item">📄 /README.md - Main project documentation</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Source Code Tab -->
+        <div id="source" class="tab-content">
+            <h2>Source Code</h2>
+            
+            <div class="section">
+                <h3>Source Code Organization</h3>
+                <div class="directory">
+                    <div class="directory-item category">📁 /src/assets/</div>
+                    <div class="directory-item category">📁 /src/components/</div>
+                    <div class="directory-item category">📁 /src/contexts/</div>
+                    <div class="directory-item category">📁 /src/hooks/</div>
+                    <div class="directory-item category">📁 /src/pages/</div>
+                    <div class="directory-item category">📁 /src/services/</div>
+                    <div class="directory-item category">📁 /src/sql/</div>
+                    <div class="directory-item category">📁 /src/utils/</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Tab functionality
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active class from all tabs
+                document.querySelectorAll('.nav-tab').forEach(t => {
+                    t.classList.remove('active');
+                });
+                
+                // Hide all tab content
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                
+                // Add active class to clicked tab
+                tab.classList.add('active');
+                
+                // Show corresponding tab content
+                const tabId = tab.getAttribute('data-tab');
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+        
+        // Search functionality
+        document.getElementById('search').addEventListener('input', function() {
+            const searchValue = this.value.toLowerCase();
+            
+            document.querySelectorAll('.directory-item').forEach(item => {
+                const text = item.textContent.toLowerCase();
+                
+                if (text.includes(searchValue)) {
+                    item.style.display = 'block';
+                    
+                    // Make sure parent categories are also visible
+                    let parent = item;
+                    while (parent.previousElementSibling) {
+                        parent = parent.previousElementSibling;
+                        if (parent.classList.contains('category')) {
+                            parent.style.display = 'block';
+                            break;
+                        }
+                    }
+                } else {
+                    if (!item.classList.contains('category')) {
+                        item.style.display = 'none';
+                    }
+                }
+            });
+            
+            // Hide categories with no visible children
+            if (searchValue) {
+                document.querySelectorAll('.category').forEach(category => {
+                    let nextSibling = category.nextElementSibling;
+                    let hasVisibleChildren = false;
+                    
+                    while (nextSibling && !nextSibling.classList.contains('category')) {
+                        if (nextSibling.style.display !== 'none') {
+                            hasVisibleChildren = true;
+                            break;
+                        }
+                        nextSibling = nextSibling.nextElementSibling;
+                    }
+                    
+                    category.style.display = hasVisibleChildren ? 'block' : 'none';
+                });
+            } else {
+                // Show all categories when search is cleared
+                document.querySelectorAll('.directory-item').forEach(item => {
+                    item.style.display = 'block';
+                });
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -35,9 +35,15 @@ const ContactSellerButton = ({
   const [error, setError] = useState(null);
   const [attemptCount, setAttemptCount] = useState(0);
 
+  // Early return if seller or listing is missing to prevent null reference errors
+  if (!seller || !listing) {
+    console.warn('ContactSellerButton: Missing required props (seller or listing)');
+    return null;
+  }
+
   const handleClickOpen = () => {
     if (!user) {
-      navigate('/login', { state: { from: `/listings/${listing.id}` } });
+      navigate('/login', { state: { from: `/listings/${listing.id || ''}` } });
       return;
     }
     setDialogOpen(true);
@@ -45,7 +51,9 @@ const ContactSellerButton = ({
     
     // Suggest a default message
     if (!message) {
-      setMessage(`Hi ${seller.name}, I'm interested in your listing "${listing.title}". Is it still available?`);
+      // Use username or fallback to a generic greeting if name is not available
+      const sellerName = seller.name || seller.username || 'there';
+      setMessage(`Hi ${sellerName}, I'm interested in your listing "${listing.title || 'your item'}". Is it still available?`);
     }
   };
 
@@ -142,7 +150,7 @@ const ContactSellerButton = ({
         fullWidth
         maxWidth="sm"
       >
-        <DialogTitle>Contact {seller.name}</DialogTitle>
+        <DialogTitle>Contact {seller.name || seller.username || 'Seller'}</DialogTitle>
         
         <DialogContent>
           <Box sx={{ mb: 2 }}>
@@ -150,7 +158,7 @@ const ContactSellerButton = ({
               About the listing:
             </Typography>
             <Typography variant="body2" gutterBottom>
-              {listing.title} - GHC {parseFloat(listing.price).toFixed(2)}
+              {listing.title || 'Item'} - GHC {parseFloat(listing.price || 0).toFixed(2)}
             </Typography>
           </Box>
           
@@ -206,4 +214,4 @@ const ContactSellerButton = ({
   );
 };
 
-export default ContactSellerButton; 
+export default ContactSellerButton;
