@@ -67,6 +67,7 @@ import { supabase } from '../supabaseClient';
 import { MessageBubble, MessageAttachmentUploader, TypingIndicator, MESSAGE_STATUS } from '../components/messaging';
 import { formatDistanceToNow, format } from 'date-fns';
 import { getConversations, getMessages, sendMessage, subscribeToMessages, trackConversationPresence, subscribeToTypingIndicators, sendTypingIndicator, updateUserPresence, getOnlineUsers, downloadConversationAttachments, downloadMessageAttachment as downloadAttachment } from "../services/supabase";
+import { v4 as uuidv4 } from 'uuid';
 
 // New component for conversation item
 const ConversationItem = ({ conversation, isActive, onClick, currentUserId }) => {
@@ -592,16 +593,22 @@ const MessagesPage = () => {
 
   // Send a message
   const handleSendMessage = async () => {
-    if (!activeConversation || (!newMessage.trim() && attachments.length === 0)) return;
-    
+    if (!newMessage.trim() && attachments.length === 0) return; // Don't send empty messages
+
+    setSendingMessage(true);
+    setSendError(null);
+
+    let tempId; // Declare tempId here
+
     try {
-      setSendError(null);
+      if (!activeConversation?.id || !user?.id) {
+        throw new Error("Conversation or user details missing.");
+      }
       
-      // Prepare a temporary message ID for optimistic UI updates
-      const tempId = `temp-${Date.now()}`;
-      
-      // Add message to UI immediately (optimistic update)
-      const tempMessage = {
+      tempId = uuidv4(); // Assign value inside try
+
+      // Optimistic UI update: Add the message immediately with a PENDING status
+      const optimisticMessage = {
         id: tempId,
         temp_id: tempId,
         content: newMessage.trim(),
@@ -611,7 +618,7 @@ const MessagesPage = () => {
         status: MESSAGE_STATUS.SENDING
       };
       
-      setActiveConversationMessages(prev => [...prev, tempMessage]);
+      setActiveConversationMessages(prev => [...prev, optimisticMessage]);
       
       // Clear input
       setNewMessage('');

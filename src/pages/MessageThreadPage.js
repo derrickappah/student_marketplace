@@ -253,11 +253,7 @@ const MessageThreadPage = () => {
           // Clear typing indicator for this user
           if (typingUsers[payload.new.sender_id]) {
             // The sender just sent a message, so they're no longer typing
-            setTypingUsers(prev => {
-              const newState = { ...prev };
-              delete newState[payload.new.sender_id];
-              return newState;
-            });
+            // TODO: Logic to clear typing indicator should be handled within useMessaging context
           }
           
           // Use a batch update approach for better performance
