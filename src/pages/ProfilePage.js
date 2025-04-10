@@ -226,13 +226,13 @@ const ProfilePage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Validate form
     if (!validateForm()) {
       setError('Please correct the form errors');
       return;
     }
-    
+
     setLoading(true);
     setError('');
     setSuccess('');
@@ -243,87 +243,75 @@ const ProfilePage = () => {
       let avatarUrl = formData.avatarUrl;
       if (avatarFile) {
         setAvatarLoading(true);
-        
+
         console.log('Uploading profile picture...');
         const { success, data, error: uploadError } = await uploadImage(avatarFile);
         setAvatarLoading(false);
-        
+
         if (!success) {
           console.error('Avatar upload failed:', uploadError);
           throw new Error(uploadError || 'Failed to upload avatar');
         }
-        
+
         console.log('Avatar uploaded successfully:', data);
-        avatarUrl = data.path;
+        avatarUrl = data.path; // Should be the public URL now
       }
 
-      // IMPORTANT: First update the auth metadata for the user
-      // This bypasses RLS policies
-      console.log('Updating user metadata with:', {
+      // --- NEW ORDER: Update users table FIRST ---
+      const usersTablePayload = {
+        name: formData.name,
+        bio: formData.bio,
+        university: formData.university,
+        avatar_url: avatarUrl, // Use the potentially updated avatarUrl
+        updated_at: new Date().toISOString()
+      };
+
+      const { error: profileError } = await supabase
+        .from('users')
+        .update(usersTablePayload)
+        .eq('id', user.id);
+
+      // CRITICAL: If users table update fails, throw error and STOP
+      if (profileError) {
+        console.error('[handleSubmit] Error updating profile in database:', profileError);
+        throw new Error(profileError.message || 'Failed to update profile in database');
+      }
+      // --- END users table update ---
+
+      // --- NEW ORDER: Update auth metadata SECOND ---
+      const metadataPayload = {
         name: formData.name,
         phone: formData.phone,
         bio: formData.bio,
         university: formData.university,
         avatar_url: avatarUrl,
         notification_preferences: formData.notificationPreferences
-      });
-      
-      const { error: metadataError } = await supabase.auth.updateUser({
-        data: {
-          name: formData.name,
-          phone: formData.phone,
-          bio: formData.bio,
-          university: formData.university,
-          avatar_url: avatarUrl,
-          notification_preferences: formData.notificationPreferences
-        }
-      });
-      
-      if (metadataError) {
-        console.error('Error updating user metadata:', metadataError);
-        throw new Error(metadataError.message || 'Failed to update profile');
-      }
-      
-      // Now update just the main fields in the users table
-      try {
-        const { error: profileError } = await supabase
-          .from('users')
-          .update({
-            name: formData.name,
-            phone: formData.phone,
-            bio: formData.bio,
-            university: formData.university,
-            avatar_url: avatarUrl,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', user.id);
-          
-        if (profileError) {
-          console.error('Error updating profile in database:', profileError);
-          // Don't throw, we already updated the user metadata which is most important
-        } else {
-          console.log('Profile updated in database successfully');
-        }
-      } catch (dbError) {
-        console.error('Exception in profile database update:', dbError);
-        // Continue since metadata is updated
-      }
+      };
 
-      console.log('Profile updated successfully, refreshing user data');
+      const { error: metadataError } = await supabase.auth.updateUser({
+        data: metadataPayload
+      });
+
+      // If metadata update fails, log it but maybe don't stop the whole process?
+      if (metadataError) {
+        console.error('Error updating user metadata (after DB update succeeded):', metadataError);
+      }
+      // --- END auth metadata update ---
+
+      // --- NEW ORDER: Refresh context LAST ---
       const updatedUser = await updateUser();
-      console.log('Updated user from context:', updatedUser);
-      
-      // Update form with the returned avatar url
+
+      // Update form state
       setFormData(prev => ({
         ...prev,
-        avatarUrl
+        avatarUrl: updatedUser?.avatar_url || avatarUrl // Use table value if possible
       }));
-      
-      setSuccess('Profile updated successfully');
+
+      setSuccess('Profile updated successfully.');
       setHasChanges(false);
       setIsEditing(false);
-      setSaveMessage('Profile saved successfully!');
-      
+      setSaveMessage('Profile saved!');
+
       // Clear success message after 3 seconds
       setTimeout(() => {
         setSuccess('');

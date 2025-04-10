@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase, ensureUserProfile } from "../services/supabase";
+import { supabase, ensureUserProfile, updateUserPresence } from "../services/supabase";
 
 const AuthContext = createContext({});
 
@@ -54,6 +54,44 @@ export const AuthProvider = ({ children }) => {
       subscription?.unsubscribe();
     };
   }, []);
+
+  // --- ADD Presence Update Logic --- 
+  useEffect(() => {
+    if (user) {
+      // Initial presence set when user logs in or context loads with a user
+      console.log(`AuthProvider Mount/User change: Setting presence online for user: ${user.id}`);
+      updateUserPresence(user.id, true); // Pass user.id
+
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          console.log(`Tab visible, setting presence to online for user: ${user.id}`);
+          updateUserPresence(user.id, true); // Pass user.id
+        } else {
+          console.log(`Tab hidden, setting presence to offline for user: ${user.id}`);
+          updateUserPresence(user.id, false); // Pass user.id
+        }
+      };
+
+      const handleBeforeUnload = () => {
+        console.log(`Window unloading, attempting to set presence offline for user: ${user.id}`);
+        // Note: This is best-effort and might not complete
+        updateUserPresence(user.id, false); // Pass user.id
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('beforeunload', handleBeforeUnload);
+
+      // Cleanup function
+      return () => {
+        console.log(`AuthProvider Cleanup: Removing listeners and setting offline for user: ${user.id}`);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        // Attempt to set offline on cleanup/logout
+        updateUserPresence(user.id, false); // Pass user.id
+      };
+    }
+  }, [user]); // Depend on user object
+  // --- END Presence Update Logic ---
 
   // Get additional user data from the users table
   useEffect(() => {

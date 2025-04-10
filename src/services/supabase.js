@@ -1167,9 +1167,55 @@ export const getConversations = async () => {
       };
     }));
     
+    // --- Fetch user statuses in bulk --- 
+    // 1. Collect all unique other participant IDs
+    const allParticipantIds = new Set();
+    conversationData.forEach(conv => {
+      conv.otherParticipants?.forEach(p => {
+        if (p && p.id) { // Ensure participant and id exist
+          allParticipantIds.add(p.id);
+        }
+      });
+    });
+
+    // 2. Fetch statuses for these IDs if any exist
+    const participantIdArray = Array.from(allParticipantIds);
+    const userStatusMap = new Map();
+    console.log('[getConversations] Participant IDs for status check:', participantIdArray); // <-- ADD LOG
+    if (participantIdArray.length > 0) {
+      const { data: statuses, error: statusError } = await supabase
+        .from('user_status')
+        .select('user_id, status')
+        .in('user_id', participantIdArray);
+
+      console.log('[getConversations] Status query response:', { statuses, statusError }); // <-- ADD LOG
+
+      if (statusError) {
+        console.error("Error fetching user statuses:", statusError);
+      } else if (statuses) {
+        statuses.forEach(s => userStatusMap.set(s.user_id, s.status));
+      }
+    }
+    console.log('[getConversations] User Status Map:', userStatusMap); // <-- ADD LOG
+
+    // 3. Merge statuses back into conversation data
+    const finalConversationData = conversationData.map(conv => ({
+      ...conv,
+      otherParticipants: conv.otherParticipants?.map(p => {
+        const fetchedStatus = userStatusMap.get(p.id);
+        // console.log(`[getConversations] Merging status for participant ${p.id}: Fetched='${fetchedStatus}', Default='offline'`); // <-- Optional detailed log
+        return {
+          ...p,
+          status: fetchedStatus || 'offline' // Add status, default to offline if not found
+        };
+      })
+    }));
+    console.log('[getConversations] Final conversation data with status:', finalConversationData.slice(0, 2)); // <-- ADD LOG (log first 2 items)
+    // --- End status fetching ---
+
     // After processing all conversations, try to fetch missing user profiles
     setTimeout(() => {
-      conversationData.forEach(conversation => {
+      finalConversationData.forEach(conversation => {
         conversation.otherParticipants.forEach(async participant => {
           if (participant._placeholder) {
             try {
@@ -1183,7 +1229,7 @@ export const getConversations = async () => {
       });
     }, 100);
     
-    return { data: conversationData, error: null };
+    return { data: finalConversationData, error: null };
   } catch (error) {
     console.error('Error in getConversations:', error);
     return { data: [], error };
@@ -1311,10 +1357,10 @@ export const sendTypingIndicator = async (conversationId, isTyping) => {
     const { data: result, error: funcError } = await supabase.rpc(
       'update_conversation_presence',
       {
-        conv_id: conversationId,
+        // conv_id: conversationId, // Temporarily removed for minimal function
         user_uuid: user.id,
         is_online: true, // Always online when typing
-        is_typing: isTyping
+        // is_typing: false // Temporarily removed for minimal function
       }
     );
     
@@ -2852,52 +2898,41 @@ export const fixNotificationSystem = async (userId) => {
 };
 
 // Update user presence in a conversation
-export const updateUserPresence = async (conversationId, isOnline = true) => {
+export const updateUserPresence = async (userId, isOnline) => {
+  console.log(`[updateUserPresence] Called for user ${userId}. Setting online status to: ${isOnline}`);
+  // const { data: { user }, error: userError } = await supabase.auth.getUser(); // Remove this call
+
+  // if (userError || !user) { // Remove this check
+  //   console.error('[updateUserPresence] Error getting user or no user logged in:', userError);
+  //   return; // Exit if no user
+  // }
+  // Use the passed userId directly
+  if (!userId) {
+      console.error('[updateUserPresence] No userId provided.');
+      return; // Exit if no userId is passed
+  }
+  console.log('[updateUserPresence] Using provided user ID:', userId);
+
+  const params = {
+    user_uuid: userId, // Use the passed userId
+    is_online: isOnline,
+    // conv_id: null, // Ensure conv_id is not sent if function doesn't expect it
+    // is_typing: false // Assuming not typing for general presence
+  };
+  console.log('[updateUserPresence] Calling RPC with params:', params);
+
   try {
-    if (!conversationId) throw new Error('Conversation ID is required');
-    
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) throw new Error('User not authenticated');
-    
-    // Use the new function to update presence
-    const { data: result, error: funcError } = await supabase.rpc(
-      'update_conversation_presence',
-      {
-        conv_id: conversationId,
-        user_uuid: user.id,
-        is_online: isOnline,
-        is_typing: false // Default to not typing
-      }
-    );
-    
-    if (funcError) {
-      console.error('Error updating presence:', funcError);
-      throw new Error(`Failed to update presence: ${funcError.message}`);
+    const { data, error } = await supabase.rpc('update_conversation_presence', params);
+
+    console.log('[updateUserPresence] RPC Response:', { data, error });
+
+    if (error) {
+      console.error('[updateUserPresence] Error updating presence:', error);
+    } else {
+      // console.log('[updateUserPresence] Presence updated successfully.'); // Optional: uncomment if needed
     }
-    
-    if (!result || !result.success) {
-      console.error('Function returned error:', result?.error || 'Unknown error');
-      throw new Error(result?.error || 'Failed to update presence');
-    }
-    
-    // Broadcast presence update to the conversation channel
-    const channel = supabase.channel(`presence:${conversationId}`);
-    await channel.send({
-      type: 'broadcast',
-      event: 'presence',
-      payload: {
-        user_id: user.id,
-        is_online: isOnline,
-        is_typing: false,
-        timestamp: new Date().toISOString()
-      }
-    });
-    
-    return { success: true };
-  } catch (error) {
-    console.error('Error in updateUserPresence:', error);
-    return { success: false, error };
+  } catch (rpcError) {
+    console.error('[updateUserPresence] Exception during RPC call:', rpcError);
   }
 };
 
