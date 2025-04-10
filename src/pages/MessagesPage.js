@@ -409,6 +409,7 @@ const MessagesPage = () => {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [messageFilter, setMessageFilter] = useState('all');
   const [fixingRLS, setFixingRLS] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
   
   // Refs
   const messagesContainerRef = useRef(null);
